@@ -1,0 +1,1280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f6f5f0" />
+    <title>ColorDeck — Color converter</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #f6f5f0;
+        --ink: #20251f;
+        --muted: #777b72;
+        --line: #e4e3dc;
+        --white: #fffefa;
+        --green: #42634b;
+        --green-light: #e7ece4;
+        --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+      }
+
+      * { box-sizing: border-box; }
+      body { margin: 0; color: var(--ink); background: var(--paper); }
+      button, input { font: inherit; }
+      button { color: inherit; }
+
+      .page { width: min(1120px, calc(100% - 48px)); margin: 0 auto; }
+      header { height: 82px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+      .brand { display: flex; align-items: center; gap: 11px; font-size: 15px; font-weight: 700; letter-spacing: -.04em; }
+      .brand-mark { display: grid; grid-template-columns: repeat(2, 9px); gap: 3px; transform: rotate(-8deg); }
+      .brand-mark i { width: 9px; height: 9px; border-radius: 3px; background: #d5794f; }
+      .brand-mark i:nth-child(2) { background: #dfc56c; }
+      .brand-mark i:nth-child(3) { background: #87a27a; }
+      .brand-mark i:nth-child(4) { background: #849ab5; }
+      .header-note { color: var(--muted); font-size: 12px; letter-spacing: .02em; }
+
+      main { padding: 64px 0 80px; }
+      .intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 30px; }
+      .eyebrow { margin: 0 0 12px; color: var(--green); font-size: 10px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; }
+      h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(38px, 5vw, 58px); font-weight: 400; letter-spacing: -.055em; line-height: 1.02; }
+      .intro-copy { max-width: 330px; margin: 0 0 4px; color: var(--muted); font-size: 14px; line-height: 1.65; }
+
+      .preview { display: grid; grid-template-columns: minmax(0, 1fr) 270px; min-height: 224px; overflow: hidden; margin-bottom: 32px; border: 1px solid rgba(32,37,31,.08); border-radius: 13px; background: var(--white); box-shadow: 0 5px 20px rgba(42,45,37,.035); }
+      .swatch { position: relative; min-height: 224px; background: #5b8c76; transition: background-color 140ms ease; }
+      .swatch::after { position: absolute; right: 22px; bottom: 18px; content: "LIVE PREVIEW"; color: rgba(255,255,255,.78); font-size: 9px; font-weight: 700; letter-spacing: .15em; text-shadow: 0 1px 4px rgba(0,0,0,.2); }
+      .preview-meta { display: flex; flex-direction: column; justify-content: space-between; padding: 25px 23px 21px; }
+      .meta-label { display: block; margin-bottom: 9px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+      .color-name { font-family: Georgia, "Times New Roman", serif; font-size: 25px; letter-spacing: -.035em; }
+      .preview-bottom { display: flex; align-items: end; justify-content: space-between; gap: 10px; }
+      .preview-hex { font-family: var(--mono); font-size: 15px; letter-spacing: -.04em; }
+      .color-input { width: 37px; height: 37px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: white; cursor: pointer; }
+      .color-input::-webkit-color-swatch-wrapper { padding: 0; }
+      .color-input::-webkit-color-swatch { border: 0; border-radius: 6px; }
+
+      .section-heading { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 14px; }
+      .section-heading h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
+      .section-heading p { margin: 0; color: var(--muted); font-size: 11px; }
+      .formats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+      .format-card { min-width: 0; padding: 17px; border: 1px solid var(--line); border-radius: 11px; background: var(--white); }
+      .format-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 17px; }
+      .format-title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; font-weight: 700; }
+      .format-tag { padding: 4px 6px; border-radius: 4px; background: var(--green-light); color: var(--green); font-family: var(--mono); font-size: 9px; font-weight: 600; }
+      .copy-button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 0 5px 6px; border: 0; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; transition: color 120ms ease; }
+      .copy-button:hover, .copy-button:focus-visible { color: var(--green); }
+      .copy-button svg { width: 13px; height: 13px; }
+      .field-row { display: grid; gap: 8px; }
+      fieldset.component-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+      .field-row.one { grid-template-columns: minmax(0, 1fr); }
+      .field-row.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .field-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .field { min-width: 0; }
+      .field label { display: block; margin: 0 0 6px 2px; color: var(--muted); font-size: 9px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+      .field input { width: 100%; min-width: 0; height: 39px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; outline: none; background: #fff; color: var(--ink); font-family: var(--mono); font-size: 12px; transition: border-color 120ms ease, box-shadow 120ms ease; }
+      .field input:focus { border-color: #80957c; box-shadow: 0 0 0 3px rgba(66,99,75,.1); }
+      .field input[aria-invalid="true"] { border-color: #c66b58; box-shadow: 0 0 0 3px rgba(198,107,88,.1); }
+      .field input[type="range"] { display: block; width: 100%; height: 15px; margin: 5px 0 0; padding: 0; appearance: none; border: 0; outline: none; background: transparent; cursor: pointer; }
+      .field input[type="range"]::-webkit-slider-runnable-track { height: 3px; border-radius: 99px; background: #e7e8e1; }
+      .field input[type="range"]::-moz-range-track { height: 3px; border-radius: 99px; background: #e7e8e1; }
+      .field input[type="range"]::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4.5px; appearance: none; border: 2px solid var(--white); border-radius: 50%; background: var(--green); box-shadow: 0 0 0 1px var(--green); }
+      .field input[type="range"]::-moz-range-thumb { width: 9px; height: 9px; border: 2px solid var(--white); border-radius: 50%; background: var(--green); box-shadow: 0 0 0 1px var(--green); }
+      .field input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(66,99,75,.17); }
+      .field input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px rgba(66,99,75,.17); }
+      .format-card.hex-card { grid-column: span 1; }
+      .hint { min-height: 13px; margin: 10px 1px 0; color: #a1a198; font-size: 9px; line-height: 1.4; }
+      footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 24px; padding-top: 15px; border-top: 1px solid var(--line); color: #96978f; font-size: 10px; }
+      .toast { position: fixed; bottom: 24px; left: 50%; z-index: 2; padding: 10px 15px; transform: translate(-50%, 10px); border-radius: 7px; background: #26372b; color: white; font-size: 12px; opacity: 0; pointer-events: none; transition: opacity 160ms ease, transform 160ms ease; }
+      .toast.visible { transform: translate(-50%, 0); opacity: 1; }
+      .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+      @media (max-width: 760px) {
+        main { padding-top: 46px; }
+        .formats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .intro { align-items: start; flex-direction: column; }
+        .intro-copy { max-width: 460px; }
+      }
+      @media (max-width: 520px) {
+        .page { width: min(100% - 32px, 420px); }
+        header { height: 66px; }
+        .header-note { font-size: 10px; }
+        main { padding: 36px 0 48px; }
+        .preview { grid-template-columns: minmax(0, 1fr) 140px; min-height: 170px; }
+        .swatch { min-height: 170px; }
+        .preview-meta { padding: 17px 13px 14px; }
+        .color-name { font-size: 19px; }
+        .formats { grid-template-columns: minmax(0, 1fr); }
+        .format-card { padding: 16px; }
+        footer { flex-direction: column; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>ColorDeck</div>
+        <div class="header-note">Slop-coded color black box.</div>
+      </header>
+
+      <main>
+        <section class="intro" aria-labelledby="page-title">
+          <div>
+            <p class="eyebrow">No notes. Just colors.</p>
+            <h1 id="page-title">Color, translated.</h1>
+          </div>
+          <p class="intro-copy">Paste a color. Fiddle with the numbers. They all move. This is a slop-coded black box; the copy buttons work, and that is enough.</p>
+        </section>
+
+        <section class="preview" aria-label="Color preview">
+          <div class="swatch" id="swatch" role="img" aria-label="Selected color preview"></div>
+          <div class="preview-meta">
+            <div><span class="meta-label">Closest X11 color name</span><div class="color-name" id="color-name">Teal</div></div>
+            <div class="preview-bottom"><div><span class="meta-label">Current color</span><div class="preview-hex" id="preview-hex">#5B8C76</div></div><label class="sr-only" for="native-picker">Choose a color</label><input class="color-input" id="native-picker" type="color" value="#5b8c76" /></div>
+          </div>
+        </section>
+
+        <section aria-labelledby="formats-title">
+          <div class="section-heading"><h2 id="formats-title">Color formats</h2><p>Paste a complete value into the first field, or edit a component.</p></div>
+          <div class="formats">
+            <article class="format-card hex-card" data-format="hex">
+              <div class="format-top"><h3 class="format-title" id="hex-title">Hex <span class="format-tag">HEX</span></h3><button class="copy-button" type="button" aria-label="Copy hex value" data-copy="hex"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
+              <fieldset class="component-fields" aria-labelledby="hex-title"><div class="field-row one"><div class="field"><label for="hex">Hexadecimal</label><input id="hex" data-key="hex" type="text" value="#5B8C76" spellcheck="false" autocomplete="off" /></div></div></fieldset><p class="hint">3, 6, or 8 digit hex</p>
+            </article>
+
+            <article class="format-card" data-format="rgb">
+              <div class="format-top"><h3 class="format-title" id="rgb-title">RGB <span class="format-tag">SCREEN</span></h3><button class="copy-button" type="button" aria-label="Copy RGB value" data-copy="rgb"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
+              <fieldset class="component-fields" aria-labelledby="rgb-title"><div class="field-row three"><div class="field"><label for="rgb-r">Red</label><input id="rgb-r" data-key="rgb-r" type="text" inputmode="decimal" value="91" /><input type="range" min="0" max="255" step="1" value="91" data-slider-for="rgb-r" aria-label="Adjust red" /></div><div class="field"><label for="rgb-g">Green</label><input id="rgb-g" data-key="rgb-g" type="text" inputmode="decimal" value="140" /><input type="range" min="0" max="255" step="1" value="140" data-slider-for="rgb-g" aria-label="Adjust green" /></div><div class="field"><label for="rgb-b">Blue</label><input id="rgb-b" data-key="rgb-b" type="text" inputmode="decimal" value="118" /><input type="range" min="0" max="255" step="1" value="118" data-slider-for="rgb-b" aria-label="Adjust blue" /></div></div></fieldset><p class="hint">0–255 per channel</p>
+            </article>
+
+            <article class="format-card" data-format="hsl">
+              <div class="format-top"><h3 class="format-title" id="hsl-title">HSL <span class="format-tag">CSS</span></h3><button class="copy-button" type="button" aria-label="Copy HSL value" data-copy="hsl"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
+              <fieldset class="component-fields" aria-labelledby="hsl-title"><div class="field-row three"><div class="field"><label for="hsl-h">Hue °</label><input id="hsl-h" data-key="hsl-h" type="text" inputmode="decimal" value="151" /><input type="range" min="0" max="360" step="1" value="151" data-slider-for="hsl-h" aria-label="Adjust HSL hue" /></div><div class="field"><label for="hsl-s">Saturation %</label><input id="hsl-s" data-key="hsl-s" type="text" inputmode="decimal" value="21" /><input type="range" min="0" max="100" step="1" value="21" data-slider-for="hsl-s" aria-label="Adjust HSL saturation" /></div><div class="field"><label for="hsl-l">Lightness %</label><input id="hsl-l" data-key="hsl-l" type="text" inputmode="decimal" value="45" /><input type="range" min="0" max="100" step="1" value="45" data-slider-for="hsl-l" aria-label="Adjust HSL lightness" /></div></div></fieldset><p class="hint">Hue 0–360 · others 0–100</p>
+            </article>
+
+            <article class="format-card" data-format="hsv">
+              <div class="format-top"><h3 class="format-title" id="hsv-title">HSV / HSB <span class="format-tag">DESIGN</span></h3><button class="copy-button" type="button" aria-label="Copy HSV value" data-copy="hsv"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
+              <fieldset class="component-fields" aria-labelledby="hsv-title"><div class="field-row three"><div class="field"><label for="hsv-h">Hue °</label><input id="hsv-h" data-key="hsv-h" type="text" inputmode="decimal" value="151" /><input type="range" min="0" max="360" step="1" value="151" data-slider-for="hsv-h" aria-label="Adjust HSV hue" /></div><div class="field"><label for="hsv-s">Saturation %</label><input id="hsv-s" data-key="hsv-s" type="text" inputmode="decimal" value="35" /><input type="range" min="0" max="100" step="1" value="35" data-slider-for="hsv-s" aria-label="Adjust HSV saturation" /></div><div class="field"><label for="hsv-v">Value %</label><input id="hsv-v" data-key="hsv-v" type="text" inputmode="decimal" value="55" /><input type="range" min="0" max="100" step="1" value="55" data-slider-for="hsv-v" aria-label="Adjust HSV value" /></div></div></fieldset><p class="hint">Hue 0–360 · others 0–100</p>
+            </article>
+
+            <article class="format-card" data-format="lch">
+              <div class="format-top"><h3 class="format-title" id="lch-title">LCH <span class="format-tag">CIELAB</span></h3><button class="copy-button" type="button" aria-label="Copy LCH value" data-copy="lch"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
+              <fieldset class="component-fields" aria-labelledby="lch-title"><div class="field-row three"><div class="field"><label for="lch-l">Lightness</label><input id="lch-l" data-key="lch-l" type="text" inputmode="decimal" value="53" /><input type="range" min="0" max="100" step="1" value="53" data-slider-for="lch-l" aria-label="Adjust LCH lightness" /></div><div class="field"><label for="lch-c">Chroma</label><input id="lch-c" data-key="lch-c" type="text" inputmode="decimal" value="24" /><input type="range" min="0" max="150" step="0.1" value="24" data-slider-for="lch-c" aria-label="Adjust LCH chroma" /></div><div class="field"><label for="lch-h">Hue °</label><input id="lch-h" data-key="lch-h" type="text" inputmode="decimal" value="157" /><input type="range" min="0" max="360" step="1" value="157" data-slider-for="lch-h" aria-label="Adjust LCH hue" /></div></div></fieldset><p class="hint">D50 · max chroma follows LCH lightness & hue</p>
+            </article>
+
+            <article class="format-card" data-format="oklch">
+              <div class="format-top"><h3 class="format-title" id="oklch-title">OKLCH <span class="format-tag">PERCEPTUAL</span></h3><button class="copy-button" type="button" aria-label="Copy OKLCH value" data-copy="oklch"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
+              <fieldset class="component-fields" aria-labelledby="oklch-title"><div class="field-row three"><div class="field"><label for="oklch-l">Lightness %</label><input id="oklch-l" data-key="oklch-l" type="text" inputmode="decimal" value="58" /><input type="range" min="0" max="100" step="0.1" value="58" data-slider-for="oklch-l" aria-label="Adjust OKLCH lightness" /></div><div class="field"><label for="oklch-c">Chroma</label><input id="oklch-c" data-key="oklch-c" type="text" inputmode="decimal" value="0.08" /><input type="range" min="0" max="0.4" step="0.001" value="0.08" data-slider-for="oklch-c" aria-label="Adjust OKLCH chroma" /></div><div class="field"><label for="oklch-h">Hue °</label><input id="oklch-h" data-key="oklch-h" type="text" inputmode="decimal" value="160" /><input type="range" min="0" max="360" step="0.1" value="160" data-slider-for="oklch-h" aria-label="Adjust OKLCH hue" /></div></div></fieldset><p class="hint">Max chroma follows lightness & hue</p>
+            </article>
+
+            <article class="format-card" data-format="cmyk">
+              <div class="format-top"><h3 class="format-title" id="cmyk-title">CMYK <span class="format-tag">PRINT</span></h3><button class="copy-button" type="button" aria-label="Copy CMYK value" data-copy="cmyk"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
+              <fieldset class="component-fields" aria-labelledby="cmyk-title"><div class="field-row two"><div class="field"><label for="cmyk-c">Cyan %</label><input id="cmyk-c" data-key="cmyk-c" type="text" inputmode="decimal" value="35" /><input type="range" min="0" max="100" step="1" value="35" data-slider-for="cmyk-c" aria-label="Adjust cyan" /></div><div class="field"><label for="cmyk-m">Magenta %</label><input id="cmyk-m" data-key="cmyk-m" type="text" inputmode="decimal" value="0" /><input type="range" min="0" max="100" step="1" value="0" data-slider-for="cmyk-m" aria-label="Adjust magenta" /></div><div class="field"><label for="cmyk-y">Yellow %</label><input id="cmyk-y" data-key="cmyk-y" type="text" inputmode="decimal" value="16" /><input type="range" min="0" max="100" step="1" value="16" data-slider-for="cmyk-y" aria-label="Adjust yellow" /></div><div class="field"><label for="cmyk-k">Black %</label><input id="cmyk-k" data-key="cmyk-k" type="text" inputmode="decimal" value="45" /><input type="range" min="0" max="100" step="1" value="45" data-slider-for="cmyk-k" aria-label="Adjust black" /></div></div></fieldset><p class="hint">Approximate screen-to-print conversion</p>
+            </article>
+          </div>
+        </section>
+
+        <footer><span>Please do not inspect the conversion engine.</span><span>sRGB approximations. You were warned.</span></footer>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite">Copied to clipboard</div>
+
+    <script>
+      (() => {
+        const $ = (id) => document.getElementById(id);
+        const inputs = [...document.querySelectorAll("[data-key]")];
+        // X.Org X11 rgb.txt (v1.3); aliases are normalized to readable title case.
+        const colorNames = `Snow|#fffafa
+Ghost White|#f8f8ff
+White Smoke|#f5f5f5
+Gainsboro|#dcdcdc
+Floral White|#fffaf0
+Old Lace|#fdf5e6
+Linen|#faf0e6
+Antique White|#faebd7
+Papaya Whip|#ffefd5
+Blanched Almond|#ffebcd
+Bisque|#ffe4c4
+Peach Puff|#ffdab9
+Navajo White|#ffdead
+Moccasin|#ffe4b5
+Cornsilk|#fff8dc
+Ivory|#fffff0
+Lemon Chiffon|#fffacd
+Seashell|#fff5ee
+Honeydew|#f0fff0
+Mint Cream|#f5fffa
+Azure|#f0ffff
+Alice Blue|#f0f8ff
+Lavender|#e6e6fa
+Lavender Blush|#fff0f5
+Misty Rose|#ffe4e1
+White|#ffffff
+Black|#000000
+Dark Slate Gray|#2f4f4f
+Dark Slate Grey|#2f4f4f
+Dim Gray|#696969
+Dim Grey|#696969
+Slate Gray|#708090
+Slate Grey|#708090
+Light Slate Gray|#778899
+Light Slate Grey|#778899
+Gray|#bebebe
+Grey|#bebebe
+Light Grey|#d3d3d3
+Light Gray|#d3d3d3
+Midnight Blue|#191970
+Navy|#000080
+Navy Blue|#000080
+Cornflower Blue|#6495ed
+Dark Slate Blue|#483d8b
+Slate Blue|#6a5acd
+Medium Slate Blue|#7b68ee
+Light Slate Blue|#8470ff
+Medium Blue|#0000cd
+Royal Blue|#4169e1
+Blue|#0000ff
+Dodger Blue|#1e90ff
+Deep Sky Blue|#00bfff
+Sky Blue|#87ceeb
+Light Sky Blue|#87cefa
+Steel Blue|#4682b4
+Light Steel Blue|#b0c4de
+Light Blue|#add8e6
+Powder Blue|#b0e0e6
+Pale Turquoise|#afeeee
+Dark Turquoise|#00ced1
+Medium Turquoise|#48d1cc
+Turquoise|#40e0d0
+Cyan|#00ffff
+Light Cyan|#e0ffff
+Cadet Blue|#5f9ea0
+Medium Aquamarine|#66cdaa
+Aquamarine|#7fffd4
+Dark Green|#006400
+Dark Olive Green|#556b2f
+Dark Sea Green|#8fbc8f
+Sea Green|#2e8b57
+Medium Sea Green|#3cb371
+Light Sea Green|#20b2aa
+Pale Green|#98fb98
+Spring Green|#00ff7f
+Lawn Green|#7cfc00
+Green|#00ff00
+Chartreuse|#7fff00
+Medium Spring Green|#00fa9a
+Green Yellow|#adff2f
+Lime Green|#32cd32
+Yellow Green|#9acd32
+Forest Green|#228b22
+Olive Drab|#6b8e23
+Dark Khaki|#bdb76b
+Khaki|#f0e68c
+Pale Goldenrod|#eee8aa
+Light Goldenrod Yellow|#fafad2
+Light Yellow|#ffffe0
+Yellow|#ffff00
+Gold|#ffd700
+Light Goldenrod|#eedd82
+Goldenrod|#daa520
+Dark Goldenrod|#b8860b
+Rosy Brown|#bc8f8f
+Indian Red|#cd5c5c
+Saddle Brown|#8b4513
+Sienna|#a0522d
+Peru|#cd853f
+Burlywood|#deb887
+Beige|#f5f5dc
+Wheat|#f5deb3
+Sandy Brown|#f4a460
+Tan|#d2b48c
+Chocolate|#d2691e
+Firebrick|#b22222
+Brown|#a52a2a
+Dark Salmon|#e9967a
+Salmon|#fa8072
+Light Salmon|#ffa07a
+Orange|#ffa500
+Dark Orange|#ff8c00
+Coral|#ff7f50
+Light Coral|#f08080
+Tomato|#ff6347
+Orange Red|#ff4500
+Red|#ff0000
+Hot Pink|#ff69b4
+Deep Pink|#ff1493
+Pink|#ffc0cb
+Light Pink|#ffb6c1
+Pale Violet Red|#db7093
+Maroon|#b03060
+Medium Violet Red|#c71585
+Violet Red|#d02090
+Magenta|#ff00ff
+Violet|#ee82ee
+Plum|#dda0dd
+Orchid|#da70d6
+Medium Orchid|#ba55d3
+Dark Orchid|#9932cc
+Dark Violet|#9400d3
+Blue Violet|#8a2be2
+Purple|#a020f0
+Medium Purple|#9370db
+Thistle|#d8bfd8
+Snow 1|#fffafa
+Snow 2|#eee9e9
+Snow 3|#cdc9c9
+Snow 4|#8b8989
+Seashell 1|#fff5ee
+Seashell 2|#eee5de
+Seashell 3|#cdc5bf
+Seashell 4|#8b8682
+Antique White 1|#ffefdb
+Antique White 2|#eedfcc
+Antique White 3|#cdc0b0
+Antique White 4|#8b8378
+Bisque 1|#ffe4c4
+Bisque 2|#eed5b7
+Bisque 3|#cdb79e
+Bisque 4|#8b7d6b
+Peach Puff 1|#ffdab9
+Peach Puff 2|#eecbad
+Peach Puff 3|#cdaf95
+Peach Puff 4|#8b7765
+Navajo White 1|#ffdead
+Navajo White 2|#eecfa1
+Navajo White 3|#cdb38b
+Navajo White 4|#8b795e
+Lemon Chiffon 1|#fffacd
+Lemon Chiffon 2|#eee9bf
+Lemon Chiffon 3|#cdc9a5
+Lemon Chiffon 4|#8b8970
+Cornsilk 1|#fff8dc
+Cornsilk 2|#eee8cd
+Cornsilk 3|#cdc8b1
+Cornsilk 4|#8b8878
+Ivory 1|#fffff0
+Ivory 2|#eeeee0
+Ivory 3|#cdcdc1
+Ivory 4|#8b8b83
+Honeydew 1|#f0fff0
+Honeydew 2|#e0eee0
+Honeydew 3|#c1cdc1
+Honeydew 4|#838b83
+Lavender Blush 1|#fff0f5
+Lavender Blush 2|#eee0e5
+Lavender Blush 3|#cdc1c5
+Lavender Blush 4|#8b8386
+Misty Rose 1|#ffe4e1
+Misty Rose 2|#eed5d2
+Misty Rose 3|#cdb7b5
+Misty Rose 4|#8b7d7b
+Azure 1|#f0ffff
+Azure 2|#e0eeee
+Azure 3|#c1cdcd
+Azure 4|#838b8b
+Slate Blue 1|#836fff
+Slate Blue 2|#7a67ee
+Slate Blue 3|#6959cd
+Slate Blue 4|#473c8b
+Royal Blue 1|#4876ff
+Royal Blue 2|#436eee
+Royal Blue 3|#3a5fcd
+Royal Blue 4|#27408b
+Blue 1|#0000ff
+Blue 2|#0000ee
+Blue 3|#0000cd
+Blue 4|#00008b
+Dodger Blue 1|#1e90ff
+Dodger Blue 2|#1c86ee
+Dodger Blue 3|#1874cd
+Dodger Blue 4|#104e8b
+Steel Blue 1|#63b8ff
+Steel Blue 2|#5cacee
+Steel Blue 3|#4f94cd
+Steel Blue 4|#36648b
+Deep Sky Blue 1|#00bfff
+Deep Sky Blue 2|#00b2ee
+Deep Sky Blue 3|#009acd
+Deep Sky Blue 4|#00688b
+Sky Blue 1|#87ceff
+Sky Blue 2|#7ec0ee
+Sky Blue 3|#6ca6cd
+Sky Blue 4|#4a708b
+Light Sky Blue 1|#b0e2ff
+Light Sky Blue 2|#a4d3ee
+Light Sky Blue 3|#8db6cd
+Light Sky Blue 4|#607b8b
+Slate Gray 1|#c6e2ff
+Slate Gray 2|#b9d3ee
+Slate Gray 3|#9fb6cd
+Slate Gray 4|#6c7b8b
+Light Steel Blue 1|#cae1ff
+Light Steel Blue 2|#bcd2ee
+Light Steel Blue 3|#a2b5cd
+Light Steel Blue 4|#6e7b8b
+Light Blue 1|#bfefff
+Light Blue 2|#b2dfee
+Light Blue 3|#9ac0cd
+Light Blue 4|#68838b
+Light Cyan 1|#e0ffff
+Light Cyan 2|#d1eeee
+Light Cyan 3|#b4cdcd
+Light Cyan 4|#7a8b8b
+Pale Turquoise 1|#bbffff
+Pale Turquoise 2|#aeeeee
+Pale Turquoise 3|#96cdcd
+Pale Turquoise 4|#668b8b
+Cadet Blue 1|#98f5ff
+Cadet Blue 2|#8ee5ee
+Cadet Blue 3|#7ac5cd
+Cadet Blue 4|#53868b
+Turquoise 1|#00f5ff
+Turquoise 2|#00e5ee
+Turquoise 3|#00c5cd
+Turquoise 4|#00868b
+Cyan 1|#00ffff
+Cyan 2|#00eeee
+Cyan 3|#00cdcd
+Cyan 4|#008b8b
+Dark Slate Gray 1|#97ffff
+Dark Slate Gray 2|#8deeee
+Dark Slate Gray 3|#79cdcd
+Dark Slate Gray 4|#528b8b
+Aquamarine 1|#7fffd4
+Aquamarine 2|#76eec6
+Aquamarine 3|#66cdaa
+Aquamarine 4|#458b74
+Dark Sea Green 1|#c1ffc1
+Dark Sea Green 2|#b4eeb4
+Dark Sea Green 3|#9bcd9b
+Dark Sea Green 4|#698b69
+Sea Green 1|#54ff9f
+Sea Green 2|#4eee94
+Sea Green 3|#43cd80
+Sea Green 4|#2e8b57
+Pale Green 1|#9aff9a
+Pale Green 2|#90ee90
+Pale Green 3|#7ccd7c
+Pale Green 4|#548b54
+Spring Green 1|#00ff7f
+Spring Green 2|#00ee76
+Spring Green 3|#00cd66
+Spring Green 4|#008b45
+Green 1|#00ff00
+Green 2|#00ee00
+Green 3|#00cd00
+Green 4|#008b00
+Chartreuse 1|#7fff00
+Chartreuse 2|#76ee00
+Chartreuse 3|#66cd00
+Chartreuse 4|#458b00
+Olive Drab 1|#c0ff3e
+Olive Drab 2|#b3ee3a
+Olive Drab 3|#9acd32
+Olive Drab 4|#698b22
+Dark Olive Green 1|#caff70
+Dark Olive Green 2|#bcee68
+Dark Olive Green 3|#a2cd5a
+Dark Olive Green 4|#6e8b3d
+Khaki 1|#fff68f
+Khaki 2|#eee685
+Khaki 3|#cdc673
+Khaki 4|#8b864e
+Light Goldenrod 1|#ffec8b
+Light Goldenrod 2|#eedc82
+Light Goldenrod 3|#cdbe70
+Light Goldenrod 4|#8b814c
+Light Yellow 1|#ffffe0
+Light Yellow 2|#eeeed1
+Light Yellow 3|#cdcdb4
+Light Yellow 4|#8b8b7a
+Yellow 1|#ffff00
+Yellow 2|#eeee00
+Yellow 3|#cdcd00
+Yellow 4|#8b8b00
+Gold 1|#ffd700
+Gold 2|#eec900
+Gold 3|#cdad00
+Gold 4|#8b7500
+Goldenrod 1|#ffc125
+Goldenrod 2|#eeb422
+Goldenrod 3|#cd9b1d
+Goldenrod 4|#8b6914
+Dark Goldenrod 1|#ffb90f
+Dark Goldenrod 2|#eead0e
+Dark Goldenrod 3|#cd950c
+Dark Goldenrod 4|#8b6508
+Rosy Brown 1|#ffc1c1
+Rosy Brown 2|#eeb4b4
+Rosy Brown 3|#cd9b9b
+Rosy Brown 4|#8b6969
+Indian Red 1|#ff6a6a
+Indian Red 2|#ee6363
+Indian Red 3|#cd5555
+Indian Red 4|#8b3a3a
+Sienna 1|#ff8247
+Sienna 2|#ee7942
+Sienna 3|#cd6839
+Sienna 4|#8b4726
+Burlywood 1|#ffd39b
+Burlywood 2|#eec591
+Burlywood 3|#cdaa7d
+Burlywood 4|#8b7355
+Wheat 1|#ffe7ba
+Wheat 2|#eed8ae
+Wheat 3|#cdba96
+Wheat 4|#8b7e66
+Tan 1|#ffa54f
+Tan 2|#ee9a49
+Tan 3|#cd853f
+Tan 4|#8b5a2b
+Chocolate 1|#ff7f24
+Chocolate 2|#ee7621
+Chocolate 3|#cd661d
+Chocolate 4|#8b4513
+Firebrick 1|#ff3030
+Firebrick 2|#ee2c2c
+Firebrick 3|#cd2626
+Firebrick 4|#8b1a1a
+Brown 1|#ff4040
+Brown 2|#ee3b3b
+Brown 3|#cd3333
+Brown 4|#8b2323
+Salmon 1|#ff8c69
+Salmon 2|#ee8262
+Salmon 3|#cd7054
+Salmon 4|#8b4c39
+Light Salmon 1|#ffa07a
+Light Salmon 2|#ee9572
+Light Salmon 3|#cd8162
+Light Salmon 4|#8b5742
+Orange 1|#ffa500
+Orange 2|#ee9a00
+Orange 3|#cd8500
+Orange 4|#8b5a00
+Dark Orange 1|#ff7f00
+Dark Orange 2|#ee7600
+Dark Orange 3|#cd6600
+Dark Orange 4|#8b4500
+Coral 1|#ff7256
+Coral 2|#ee6a50
+Coral 3|#cd5b45
+Coral 4|#8b3e2f
+Tomato 1|#ff6347
+Tomato 2|#ee5c42
+Tomato 3|#cd4f39
+Tomato 4|#8b3626
+Orange Red 1|#ff4500
+Orange Red 2|#ee4000
+Orange Red 3|#cd3700
+Orange Red 4|#8b2500
+Red 1|#ff0000
+Red 2|#ee0000
+Red 3|#cd0000
+Red 4|#8b0000
+Debian Red|#d70751
+Deep Pink 1|#ff1493
+Deep Pink 2|#ee1289
+Deep Pink 3|#cd1076
+Deep Pink 4|#8b0a50
+Hot Pink 1|#ff6eb4
+Hot Pink 2|#ee6aa7
+Hot Pink 3|#cd6090
+Hot Pink 4|#8b3a62
+Pink 1|#ffb5c5
+Pink 2|#eea9b8
+Pink 3|#cd919e
+Pink 4|#8b636c
+Light Pink 1|#ffaeb9
+Light Pink 2|#eea2ad
+Light Pink 3|#cd8c95
+Light Pink 4|#8b5f65
+Pale Violet Red 1|#ff82ab
+Pale Violet Red 2|#ee799f
+Pale Violet Red 3|#cd6889
+Pale Violet Red 4|#8b475d
+Maroon 1|#ff34b3
+Maroon 2|#ee30a7
+Maroon 3|#cd2990
+Maroon 4|#8b1c62
+Violet Red 1|#ff3e96
+Violet Red 2|#ee3a8c
+Violet Red 3|#cd3278
+Violet Red 4|#8b2252
+Magenta 1|#ff00ff
+Magenta 2|#ee00ee
+Magenta 3|#cd00cd
+Magenta 4|#8b008b
+Orchid 1|#ff83fa
+Orchid 2|#ee7ae9
+Orchid 3|#cd69c9
+Orchid 4|#8b4789
+Plum 1|#ffbbff
+Plum 2|#eeaeee
+Plum 3|#cd96cd
+Plum 4|#8b668b
+Medium Orchid 1|#e066ff
+Medium Orchid 2|#d15fee
+Medium Orchid 3|#b452cd
+Medium Orchid 4|#7a378b
+Dark Orchid 1|#bf3eff
+Dark Orchid 2|#b23aee
+Dark Orchid 3|#9a32cd
+Dark Orchid 4|#68228b
+Purple 1|#9b30ff
+Purple 2|#912cee
+Purple 3|#7d26cd
+Purple 4|#551a8b
+Medium Purple 1|#ab82ff
+Medium Purple 2|#9f79ee
+Medium Purple 3|#8968cd
+Medium Purple 4|#5d478b
+Thistle 1|#ffe1ff
+Thistle 2|#eed2ee
+Thistle 3|#cdb5cd
+Thistle 4|#8b7b8b
+Gray 0|#000000
+Grey 0|#000000
+Gray 1|#030303
+Grey 1|#030303
+Gray 2|#050505
+Grey 2|#050505
+Gray 3|#080808
+Grey 3|#080808
+Gray 4|#0a0a0a
+Grey 4|#0a0a0a
+Gray 5|#0d0d0d
+Grey 5|#0d0d0d
+Gray 6|#0f0f0f
+Grey 6|#0f0f0f
+Gray 7|#121212
+Grey 7|#121212
+Gray 8|#141414
+Grey 8|#141414
+Gray 9|#171717
+Grey 9|#171717
+Gray 10|#1a1a1a
+Grey 10|#1a1a1a
+Gray 11|#1c1c1c
+Grey 11|#1c1c1c
+Gray 12|#1f1f1f
+Grey 12|#1f1f1f
+Gray 13|#212121
+Grey 13|#212121
+Gray 14|#242424
+Grey 14|#242424
+Gray 15|#262626
+Grey 15|#262626
+Gray 16|#292929
+Grey 16|#292929
+Gray 17|#2b2b2b
+Grey 17|#2b2b2b
+Gray 18|#2e2e2e
+Grey 18|#2e2e2e
+Gray 19|#303030
+Grey 19|#303030
+Gray 20|#333333
+Grey 20|#333333
+Gray 21|#363636
+Grey 21|#363636
+Gray 22|#383838
+Grey 22|#383838
+Gray 23|#3b3b3b
+Grey 23|#3b3b3b
+Gray 24|#3d3d3d
+Grey 24|#3d3d3d
+Gray 25|#404040
+Grey 25|#404040
+Gray 26|#424242
+Grey 26|#424242
+Gray 27|#454545
+Grey 27|#454545
+Gray 28|#474747
+Grey 28|#474747
+Gray 29|#4a4a4a
+Grey 29|#4a4a4a
+Gray 30|#4d4d4d
+Grey 30|#4d4d4d
+Gray 31|#4f4f4f
+Grey 31|#4f4f4f
+Gray 32|#525252
+Grey 32|#525252
+Gray 33|#545454
+Grey 33|#545454
+Gray 34|#575757
+Grey 34|#575757
+Gray 35|#595959
+Grey 35|#595959
+Gray 36|#5c5c5c
+Grey 36|#5c5c5c
+Gray 37|#5e5e5e
+Grey 37|#5e5e5e
+Gray 38|#616161
+Grey 38|#616161
+Gray 39|#636363
+Grey 39|#636363
+Gray 40|#666666
+Grey 40|#666666
+Gray 41|#696969
+Grey 41|#696969
+Gray 42|#6b6b6b
+Grey 42|#6b6b6b
+Gray 43|#6e6e6e
+Grey 43|#6e6e6e
+Gray 44|#707070
+Grey 44|#707070
+Gray 45|#737373
+Grey 45|#737373
+Gray 46|#757575
+Grey 46|#757575
+Gray 47|#787878
+Grey 47|#787878
+Gray 48|#7a7a7a
+Grey 48|#7a7a7a
+Gray 49|#7d7d7d
+Grey 49|#7d7d7d
+Gray 50|#7f7f7f
+Grey 50|#7f7f7f
+Gray 51|#828282
+Grey 51|#828282
+Gray 52|#858585
+Grey 52|#858585
+Gray 53|#878787
+Grey 53|#878787
+Gray 54|#8a8a8a
+Grey 54|#8a8a8a
+Gray 55|#8c8c8c
+Grey 55|#8c8c8c
+Gray 56|#8f8f8f
+Grey 56|#8f8f8f
+Gray 57|#919191
+Grey 57|#919191
+Gray 58|#949494
+Grey 58|#949494
+Gray 59|#969696
+Grey 59|#969696
+Gray 60|#999999
+Grey 60|#999999
+Gray 61|#9c9c9c
+Grey 61|#9c9c9c
+Gray 62|#9e9e9e
+Grey 62|#9e9e9e
+Gray 63|#a1a1a1
+Grey 63|#a1a1a1
+Gray 64|#a3a3a3
+Grey 64|#a3a3a3
+Gray 65|#a6a6a6
+Grey 65|#a6a6a6
+Gray 66|#a8a8a8
+Grey 66|#a8a8a8
+Gray 67|#ababab
+Grey 67|#ababab
+Gray 68|#adadad
+Grey 68|#adadad
+Gray 69|#b0b0b0
+Grey 69|#b0b0b0
+Gray 70|#b3b3b3
+Grey 70|#b3b3b3
+Gray 71|#b5b5b5
+Grey 71|#b5b5b5
+Gray 72|#b8b8b8
+Grey 72|#b8b8b8
+Gray 73|#bababa
+Grey 73|#bababa
+Gray 74|#bdbdbd
+Grey 74|#bdbdbd
+Gray 75|#bfbfbf
+Grey 75|#bfbfbf
+Gray 76|#c2c2c2
+Grey 76|#c2c2c2
+Gray 77|#c4c4c4
+Grey 77|#c4c4c4
+Gray 78|#c7c7c7
+Grey 78|#c7c7c7
+Gray 79|#c9c9c9
+Grey 79|#c9c9c9
+Gray 80|#cccccc
+Grey 80|#cccccc
+Gray 81|#cfcfcf
+Grey 81|#cfcfcf
+Gray 82|#d1d1d1
+Grey 82|#d1d1d1
+Gray 83|#d4d4d4
+Grey 83|#d4d4d4
+Gray 84|#d6d6d6
+Grey 84|#d6d6d6
+Gray 85|#d9d9d9
+Grey 85|#d9d9d9
+Gray 86|#dbdbdb
+Grey 86|#dbdbdb
+Gray 87|#dedede
+Grey 87|#dedede
+Gray 88|#e0e0e0
+Grey 88|#e0e0e0
+Gray 89|#e3e3e3
+Grey 89|#e3e3e3
+Gray 90|#e5e5e5
+Grey 90|#e5e5e5
+Gray 91|#e8e8e8
+Grey 91|#e8e8e8
+Gray 92|#ebebeb
+Grey 92|#ebebeb
+Gray 93|#ededed
+Grey 93|#ededed
+Gray 94|#f0f0f0
+Grey 94|#f0f0f0
+Gray 95|#f2f2f2
+Grey 95|#f2f2f2
+Gray 96|#f5f5f5
+Grey 96|#f5f5f5
+Gray 97|#f7f7f7
+Grey 97|#f7f7f7
+Gray 98|#fafafa
+Grey 98|#fafafa
+Gray 99|#fcfcfc
+Grey 99|#fcfcfc
+Gray 100|#ffffff
+Grey 100|#ffffff
+Dark Grey|#a9a9a9
+Dark Gray|#a9a9a9
+Dark Blue|#00008b
+Dark Cyan|#008b8b
+Dark Magenta|#8b008b
+Dark Red|#8b0000
+Light Green|#90ee90`.split("\n").map((entry) => {
+          const separator = entry.lastIndexOf("|");
+          return [entry.slice(0, separator), entry.slice(separator + 1)];
+        });
+        let rgb = [91, 140, 118];
+        let activeSliderKey = null;
+        let urlSyncReady = false;
+        let toastTimer;
+
+        const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+        const number = (key) => Number($(key).value.trim());
+        const setValue = (key, value) => { $(key).value = String(value); $(key).setAttribute("aria-invalid", "false"); };
+        const round = (value, places = 0) => Number(value.toFixed(places));
+        const significant = (value, digits = 4) => Number(value.toPrecision(digits));
+        const hexFromRgb = ([r, g, b]) => "#" + [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("").toUpperCase();
+
+        function rgbToHsl([r, g, b]) {
+          r /= 255; g /= 255; b /= 255;
+          const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
+          let h = 0, s = 0;
+          const l = (max + min) / 2;
+          if (delta) {
+            s = delta / (1 - Math.abs(2 * l - 1));
+            if (max === r) h = 60 * (((g - b) / delta) % 6);
+            else if (max === g) h = 60 * ((b - r) / delta + 2);
+            else h = 60 * ((r - g) / delta + 4);
+          }
+          return [(h + 360) % 360, s * 100, l * 100];
+        }
+
+        function hslToRgb(h, s, l) {
+          h = ((h % 360) + 360) % 360 / 360; s /= 100; l /= 100;
+          const f = (n) => {
+            const k = (n + h * 12) % 12;
+            const a = s * Math.min(l, 1 - l);
+            return 255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)));
+          };
+          return [f(0), f(8), f(4)];
+        }
+
+        function rgbToHsv([r, g, b]) {
+          r /= 255; g /= 255; b /= 255;
+          const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
+          let h = 0;
+          if (delta) {
+            if (max === r) h = 60 * (((g - b) / delta) % 6);
+            else if (max === g) h = 60 * ((b - r) / delta + 2);
+            else h = 60 * ((r - g) / delta + 4);
+          }
+          return [(h + 360) % 360, max ? delta / max * 100 : 0, max * 100];
+        }
+
+        function hsvToRgb(h, s, v) {
+          h = ((h % 360) + 360) % 360;
+          s /= 100; v /= 100;
+          const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+          const sectors = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+          return sectors.map((n) => (n + m) * 255);
+        }
+
+        function rgbToXyz([r, g, b]) {
+          const linear = (v) => { v /= 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; };
+          r = linear(r); g = linear(g); b = linear(b);
+          return [r * .4124564 + g * .3575761 + b * .1804375, r * .2126729 + g * .7151522 + b * .072175, r * .0193339 + g * .119192 + b * .9503041];
+        }
+
+        function xyzToRgbUnclamped([x, y, z]) {
+          let r = x * 3.2404542 - y * 1.5371385 - z * .4985314;
+          let g = -x * .969266 + y * 1.8760108 + z * .041556;
+          let b = x * .0556434 - y * .2040259 + z * 1.0572252;
+          const gamma = (v) => 255 * (v <= .0031308 ? 12.92 * v : 1.055 * Math.max(0, v) ** (1 / 2.4) - .055);
+          return [gamma(r), gamma(g), gamma(b)];
+        }
+
+        function xyzToLab([x, y, z]) {
+          // Bradford adaptation from D65 (sRGB) to D50, the CSS CIELAB reference white.
+          const d50 = [.9555766 * x - .0230393 * y + .0631636 * z, -.0282895 * x + 1.0099416 * y + .0210077 * z, .0122982 * x - .020483 * y + 1.3299098 * z];
+          const f = (t) => t > .008856451679 ? Math.cbrt(t) : 7.787037 * t + 16 / 116;
+          const fx = f(d50[0] / .96422), fy = f(d50[1]), fz = f(d50[2] / .82521);
+          return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+        }
+
+        function labToXyz([l, a, b]) {
+          const fy = (l + 16) / 116, fx = fy + a / 500, fz = fy - b / 200;
+          const finv = (t) => t ** 3 > .008856451679 ? t ** 3 : (t - 16 / 116) / 7.787037;
+          const x = .96422 * finv(fx), y = finv(fy), z = .82521 * finv(fz);
+          // Inverse Bradford adaptation from D50 back to the sRGB D65 white point.
+          return [x * 1.0478112 + y * .0228866 - z * .050127, x * .0295424 + y * .9904844 - z * .0170491, -x * .0092345 + y * .0150436 + z * .7521316];
+        }
+
+        function rgbToLch(color) {
+          const [l, a, b] = xyzToLab(rgbToXyz(color));
+          return [l, Math.hypot(a, b), (Math.atan2(b, a) * 180 / Math.PI + 360) % 360];
+        }
+
+        function fitChromaToSrgb(chroma, convert) {
+          const inGamut = (color) => color.every((channel) => channel >= 0 && channel <= 255);
+          const requested = convert(chroma);
+          if (inGamut(requested)) return requested.map((channel) => clamp(channel, 0, 255));
+
+          // Reduce only chroma so lightness and hue remain fixed when mapping into sRGB.
+          let low = 0, high = chroma;
+          for (let i = 0; i < 28; i++) {
+            const middle = (low + high) / 2;
+            if (inGamut(convert(middle))) low = middle;
+            else high = middle;
+          }
+          return convert(low).map((channel) => clamp(channel, 0, 255));
+        }
+
+        function maxChromaInSrgb(convert) {
+          const inGamut = (color) => color.every((channel) => channel >= 0 && channel <= 255);
+          let low = 0, high = 1;
+          while (high < 1024 && inGamut(convert(high))) {
+            low = high;
+            high *= 2;
+          }
+          for (let i = 0; i < 32; i++) {
+            const middle = (low + high) / 2;
+            if (inGamut(convert(middle))) low = middle;
+            else high = middle;
+          }
+          return low;
+        }
+
+        function lchRgbAtChroma(l, chroma, h) {
+          const radians = h * Math.PI / 180;
+          return xyzToRgbUnclamped(labToXyz([l, chroma * Math.cos(radians), chroma * Math.sin(radians)]));
+        }
+
+        function lchToRgb(l, c, h) {
+          return fitChromaToSrgb(c, (chroma) => lchRgbAtChroma(l, chroma, h));
+        }
+
+        function maxLchChroma(l, h) {
+          return maxChromaInSrgb((chroma) => lchRgbAtChroma(l, chroma, h));
+        }
+
+        function rgbToOklch(color) {
+          const [r8, g8, b8] = color.map((v) => v / 255);
+          const linear = (v) => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;
+          const r = linear(r8), g = linear(g8), b = linear(b8);
+          const l = Math.cbrt(.4122214708 * r + .5363325363 * g + .0514459929 * b);
+          const m = Math.cbrt(.2119034982 * r + .6806995451 * g + .1073969566 * b);
+          const s = Math.cbrt(.0883024619 * r + .2817188376 * g + .6299787005 * b);
+          const L = .2104542553 * l + .793617785 * m - .0040720468 * s;
+          const a = 1.9779984951 * l - 2.428592205 * m + .4505937099 * s;
+          const bb = .0259040371 * l + .7827717662 * m - .808675766 * s;
+          return [L * 100, Math.hypot(a, bb), (Math.atan2(bb, a) * 180 / Math.PI + 360) % 360];
+        }
+
+        function oklchRgbAtChroma(L, chroma, h) {
+          L /= 100;
+          const radians = h * Math.PI / 180;
+          const a = chroma * Math.cos(radians), b = chroma * Math.sin(radians);
+          const l = (L + .3963377774 * a + .2158037573 * b) ** 3;
+          const m = (L - .1055613458 * a - .0638541728 * b) ** 3;
+          const s = (L - .0894841775 * a - 1.291485548 * b) ** 3;
+          const linear = [4.0767416621 * l - 3.3077115913 * m + .2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - .3413193965 * s, -.0041960863 * l - .7034186147 * m + 1.707614701 * s];
+          const gamma = (v) => 255 * (v <= .0031308 ? 12.92 * v : 1.055 * Math.max(0, v) ** (1 / 2.4) - .055);
+          return linear.map(gamma);
+        }
+
+        function oklchToRgb(L, C, h) {
+          return fitChromaToSrgb(C, (chroma) => oklchRgbAtChroma(L, chroma, h));
+        }
+
+        function maxOklchChroma(L, h) {
+          return maxChromaInSrgb((chroma) => oklchRgbAtChroma(L, chroma, h));
+        }
+
+        function rgbToCmyk([r, g, b]) {
+          const rn = r / 255, gn = g / 255, bn = b / 255;
+          const k = 1 - Math.max(rn, gn, bn);
+          if (k === 1) return [0, 0, 0, 100];
+          return [(1 - rn - k) / (1 - k) * 100, (1 - gn - k) / (1 - k) * 100, (1 - bn - k) / (1 - k) * 100, k * 100];
+        }
+
+        function cmykToRgb(c, m, y, k) {
+          c /= 100; m /= 100; y /= 100; k /= 100;
+          return [255 * (1 - c) * (1 - k), 255 * (1 - m) * (1 - k), 255 * (1 - y) * (1 - k)];
+        }
+
+        function closestName(color) {
+          const lab = xyzToLab(rgbToXyz(color));
+          let best = colorNames[0], distance = Infinity;
+          for (const entry of colorNames) {
+            const hex = entry[1].slice(1);
+            const sample = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+            const targetLab = xyzToLab(rgbToXyz(sample));
+            const d = Math.hypot(lab[0] - targetLab[0], lab[1] - targetLab[1], lab[2] - targetLab[2]);
+            if (d < distance) { distance = d; best = entry; }
+          }
+          return best[0];
+        }
+
+        function updateUrlColor(hex) {
+          const url = new URL(window.location.href);
+          if (url.hash.toUpperCase() === hex) return;
+          url.hash = hex;
+          window.history.replaceState(window.history.state, "", url);
+        }
+
+        function updateFields(preserveFormat, preserveKeys = []) {
+          const preservedGroup = preserveFormat ? preserveFormat.split("-")[0] : null;
+          const preservedKeySet = new Set(preserveKeys);
+          const write = (key, value) => {
+            const slider = document.querySelector(`[data-slider-for="${key}"]`);
+            const isPreserved = preservedKeySet.has(key) || (preservedGroup && (key === preservedGroup || key.startsWith(`${preservedGroup}-`)));
+            // Keep the pointer tracking during a drag; a clipped color can have less chroma than requested.
+            if (slider && activeSliderKey !== key) slider.value = isPreserved ? $(key).value : value;
+            if (!isPreserved) setValue(key, value);
+          };
+          const hex = hexFromRgb(rgb);
+          const hsl = rgbToHsl(rgb), hsv = rgbToHsv(rgb), lch = rgbToLch(rgb), oklch = rgbToOklch(rgb), cmyk = rgbToCmyk(rgb);
+          const lchChromaSlider = document.querySelector('[data-slider-for="lch-c"]');
+          const oklchChromaSlider = document.querySelector('[data-slider-for="oklch-c"]');
+          if (lchChromaSlider) {
+            lchChromaSlider.min = 0;
+            lchChromaSlider.max = maxLchChroma(lch[0], lch[2]);
+            lchChromaSlider.step = "any";
+          }
+          if (oklchChromaSlider) {
+            oklchChromaSlider.min = 0;
+            oklchChromaSlider.max = maxOklchChroma(oklch[0], oklch[2]);
+            oklchChromaSlider.step = "any";
+          }
+          write("hex", hex);
+          ["rgb-r", "rgb-g", "rgb-b"].forEach((key, i) => write(key, round(rgb[i])));
+          ["hsl-h", "hsl-s", "hsl-l"].forEach((key, i) => write(key, round(hsl[i])));
+          ["hsv-h", "hsv-s", "hsv-v"].forEach((key, i) => write(key, round(hsv[i])));
+          write("lch-l", round(lch[0], 1));
+          write("lch-c", significant(lch[1]));
+          write("lch-h", round(lch[2], 1));
+          write("oklch-l", round(oklch[0], 1));
+          write("oklch-c", significant(oklch[1]));
+          write("oklch-h", round(oklch[2], 1));
+          ["cmyk-c", "cmyk-m", "cmyk-y", "cmyk-k"].forEach((key, i) => write(key, round(cmyk[i])));
+          const color = hex.toLowerCase();
+          $("swatch").style.backgroundColor = color;
+          $("swatch").setAttribute("aria-label", `Selected color ${hex}`);
+          $("preview-hex").textContent = hex;
+          $("color-name").textContent = closestName(rgb);
+          $("native-picker").value = color;
+          if (urlSyncReady) updateUrlColor(hex);
+        }
+
+        function settleChromaChange(key) {
+          if (key === "lch-c") return updateFields(undefined, ["lch-l", "lch-h"]);
+          if (key === "oklch-c") return updateFields(undefined, ["oklch-l", "oklch-h"]);
+          updateFields();
+        }
+
+        function parseHex(value) {
+          const match = value.trim().match(/^#?([\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i);
+          if (!match) return null;
+          let hex = match[1];
+          if (hex.length <= 4) hex = [...hex].map((char) => char + char).join("");
+          return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+        }
+
+        function parseFunctional(value) {
+          const match = value.trim().match(/^(rgb|rgba|hsl|hsla|hsv|hsb|lch|oklch|cmyk)\(\s*([^)]*)\s*\)$/i);
+          if (!match) return null;
+          const format = match[1].toLowerCase();
+          const parts = match[2].replaceAll(",", " ").replaceAll("/", " ").trim().split(/\s+/).map((v) => parseFloat(v));
+          if (parts.length < (format.startsWith("cmyk") ? 4 : 3) || parts.some((n) => !Number.isFinite(n))) return null;
+          if (format.startsWith("rgb")) return parts.slice(0, 3).map((v) => clamp(v, 0, 255));
+          if (format.startsWith("hsl")) return hslToRgb(parts[0], parts[1], parts[2]);
+          if (format === "hsv" || format === "hsb") return hsvToRgb(parts[0], parts[1], parts[2]);
+          if (format === "lch") return lchToRgb(parts[0], parts[1], parts[2]);
+          if (format === "oklch") return oklchToRgb(parts[0], parts[1], parts[2]);
+          if (format === "cmyk") return cmykToRgb(...parts.slice(0, 4));
+          return null;
+        }
+
+        function parseBareFormat(key, value) {
+          const format = key.split("-")[0];
+          const expectedParts = format === "cmyk" ? 4 : 3;
+          if (!["rgb", "hsl", "hsv", "lch", "oklch", "cmyk"].includes(format)) return null;
+
+          const tokens = value.trim().split(/[\s,\/]+/).filter(Boolean);
+          if (tokens.length !== expectedParts) return null;
+          const values = [];
+          const units = [];
+          for (const token of tokens) {
+            const match = token.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|°)?$/i);
+            if (!match) return null;
+            values.push(Number(match[1]));
+            units.push((match[2] || "").toLowerCase());
+          }
+          if (values.some((part) => !Number.isFinite(part))) return null;
+
+          if (format === "rgb") {
+            const channels = values.map((part, i) => units[i] === "%" ? part * 2.55 : part);
+            return channels.every((part) => part >= 0 && part <= 255) ? channels : null;
+          }
+          if (format === "hsl" || format === "hsv") {
+            if (values[1] < 0 || values[1] > 100 || values[2] < 0 || values[2] > 100) return null;
+            return format === "hsl" ? hslToRgb(...values) : hsvToRgb(...values);
+          }
+          if (format === "lch") {
+            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? lchToRgb(...values) : null;
+          }
+          if (format === "oklch") {
+            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? oklchToRgb(...values) : null;
+          }
+          return values.every((part) => part >= 0 && part <= 100) ? cmykToRgb(...values) : null;
+        }
+
+        function rgbFromInput(key) {
+          if (key === "hex") {
+            // Avoid expanding shorthand while someone is still typing a longer hex value.
+            if (!/^#?[\da-f]{6}(?:[\da-f]{2})?$/i.test($(key).value.trim())) return null;
+            return parseHex($(key).value);
+          }
+          if (key.startsWith("rgb-")) {
+            const vals = ["rgb-r", "rgb-g", "rgb-b"].map(number);
+            return vals.every(Number.isFinite) && vals.every((v) => v >= 0 && v <= 255) ? vals.map(Math.round) : null;
+          }
+          if (key.startsWith("hsl-")) {
+            const vals = ["hsl-h", "hsl-s", "hsl-l"].map(number);
+            return vals.every(Number.isFinite) && vals[1] >= 0 && vals[1] <= 100 && vals[2] >= 0 && vals[2] <= 100 ? hslToRgb(...vals) : null;
+          }
+          if (key.startsWith("hsv-")) {
+            const vals = ["hsv-h", "hsv-s", "hsv-v"].map(number);
+            return vals.every(Number.isFinite) && vals[1] >= 0 && vals[1] <= 100 && vals[2] >= 0 && vals[2] <= 100 ? hsvToRgb(...vals) : null;
+          }
+          if (key.startsWith("lch-")) {
+            const vals = ["lch-l", "lch-c", "lch-h"].map(number);
+            return vals.every(Number.isFinite) && vals[0] >= 0 && vals[0] <= 100 && vals[1] >= 0 ? lchToRgb(...vals) : null;
+          }
+          if (key.startsWith("oklch-")) {
+            const vals = ["oklch-l", "oklch-c", "oklch-h"].map(number);
+            return vals.every(Number.isFinite) && vals[0] >= 0 && vals[0] <= 100 && vals[1] >= 0 ? oklchToRgb(...vals) : null;
+          }
+          if (key.startsWith("cmyk-")) {
+            const vals = ["cmyk-c", "cmyk-m", "cmyk-y", "cmyk-k"].map(number);
+            return vals.every(Number.isFinite) && vals.every((v) => v >= 0 && v <= 100) ? cmykToRgb(...vals) : null;
+          }
+          return null;
+        }
+
+        function pasteColor(key, value) {
+          const color = parseHex(value) || parseFunctional(value) || parseBareFormat(key, value);
+          if (!color) return false;
+          rgb = color.map((v) => clamp(v, 0, 255));
+          updateFields();
+          return true;
+        }
+
+        inputs.forEach((input) => {
+          input.addEventListener("paste", (event) => {
+            const pasted = event.clipboardData?.getData("text") || "";
+            if (pasteColor(input.dataset.key, pasted)) event.preventDefault();
+          });
+          input.addEventListener("input", () => {
+            const key = input.dataset.key;
+            if (input.value.trim() === "") { input.setAttribute("aria-invalid", "true"); return; }
+            const pastedFormat = parseFunctional(input.value) || parseBareFormat(key, input.value);
+            if (pastedFormat) {
+              rgb = pastedFormat.map((v) => clamp(v, 0, 255));
+              updateFields();
+              return;
+            }
+            const next = rgbFromInput(key);
+            if (next) {
+              rgb = next.map((v) => clamp(v, 0, 255));
+              input.setAttribute("aria-invalid", "false");
+              updateFields(key);
+            } else {
+              input.setAttribute("aria-invalid", "true");
+            }
+          });
+          input.addEventListener("blur", () => {
+            settleChromaChange(input.dataset.key);
+          });
+        });
+
+        document.querySelectorAll("[data-slider-for]").forEach((slider) => {
+          slider.addEventListener("input", () => {
+            const field = $(slider.dataset.sliderFor);
+            activeSliderKey = slider.dataset.sliderFor;
+            field.value = String(significant(Number(slider.value)));
+            field.dispatchEvent(new Event("input", { bubbles: true }));
+            activeSliderKey = null;
+          });
+          slider.addEventListener("change", () => settleChromaChange(slider.dataset.sliderFor));
+        });
+
+        $("native-picker").addEventListener("input", (event) => {
+          rgb = parseHex(event.target.value);
+          updateFields();
+        });
+
+        const copyValues = {
+          hex: () => hexFromRgb(rgb),
+          rgb: () => `rgb(${rgb.map(Math.round).join(" ")})`,
+          hsl: () => { const v = rgbToHsl(rgb); return `hsl(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
+          hsv: () => { const v = rgbToHsv(rgb); return `hsv(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
+          lch: () => { const v = rgbToLch(rgb); return `lch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
+          oklch: () => { const v = rgbToOklch(rgb); return `oklch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
+          cmyk: () => `cmyk(${rgbToCmyk(rgb).map((v) => round(v)).join(" ")})`
+        };
+
+        document.querySelectorAll("[data-copy]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const value = copyValues[button.dataset.copy]();
+            try {
+              await navigator.clipboard.writeText(value);
+              $("toast").textContent = `Copied ${value}`;
+              $("toast").classList.add("visible");
+              clearTimeout(toastTimer);
+              toastTimer = setTimeout(() => $("toast").classList.remove("visible"), 1600);
+            } catch {
+              $("toast").textContent = "Clipboard access unavailable";
+              $("toast").classList.add("visible");
+              clearTimeout(toastTimer);
+              toastTimer = setTimeout(() => $("toast").classList.remove("visible"), 1800);
+            }
+          });
+        });
+
+        const colorFromUrl = parseHex(window.location.hash);
+        if (colorFromUrl) rgb = colorFromUrl;
+        updateFields();
+        urlSyncReady = true;
+        window.addEventListener("hashchange", () => {
+          const colorFromHash = parseHex(window.location.hash);
+          if (!colorFromHash) return;
+          rgb = colorFromHash;
+          updateFields();
+        });
+      })();
+    </script>
+  </body>
+</html>
