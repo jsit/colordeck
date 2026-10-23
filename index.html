@@ -181,8 +181,12 @@
 
     <script>
       (() => {
-        const $ = (id) => document.getElementById(id);
+        const elements = new Map([...document.querySelectorAll("[id]")].map((element) => [element.id, element]));
+        const $ = (id) => elements.get(id);
         const inputs = [...document.querySelectorAll("[data-key]")];
+        const inputByKey = new Map(inputs.map((input) => [input.dataset.key, input]));
+        const sliders = [...document.querySelectorAll("[data-slider-for]")];
+        const sliderByKey = new Map(sliders.map((slider) => [slider.dataset.sliderFor, slider]));
         // X.Org X11 rgb.txt (v1.3); aliases are normalized to readable title case.
         const colorNames = `Snow|#fffafa
 Ghost White|#f8f8ff
@@ -850,10 +854,15 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         let activeSliderKey = null;
         let urlSyncReady = false;
         let toastTimer;
+        const chromaMaxima = { lch: null, oklch: null };
 
         const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-        const number = (key) => Number($(key).value.trim());
-        const setValue = (key, value) => { $(key).value = String(value); $(key).setAttribute("aria-invalid", "false"); };
+        const number = (key) => Number(inputByKey.get(key).value.trim());
+        const setValue = (key, value) => {
+          const input = inputByKey.get(key);
+          input.value = String(value);
+          input.setAttribute("aria-invalid", "false");
+        };
         const round = (value, places = 0) => Number(value.toFixed(places));
         const significant = (value, digits = 4) => Number(value.toPrecision(digits));
         const hexFromRgb = ([r, g, b]) => "#" + [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("").toUpperCase();
@@ -955,6 +964,12 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
         }
 
+        const colorNameLabs = colorNames.map((entry) => {
+          const hex = entry[1].slice(1);
+          const sample = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+          return xyzToLab(rgbToXyz(sample));
+        });
+
         function labToXyz([l, a, b]) {
           const fy = (l + 16) / 116, fx = fy + a / 500, fz = fy - b / 200;
           const finv = (t) => t ** 3 > .008856451679 ? t ** 3 : (t - 16 / 116) / 7.787037;
@@ -1044,6 +1059,14 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return maxChromaInSrgb((chroma) => oklchRgbAtChroma(L, chroma, h));
         }
 
+        function cachedMaxChroma(model, lightness, hue, calculate) {
+          const cached = chromaMaxima[model];
+          if (cached && cached.lightness === lightness && cached.hue === hue) return cached.value;
+          const value = calculate(lightness, hue);
+          chromaMaxima[model] = { lightness, hue, value };
+          return value;
+        }
+
         function rgbToCmyk([r, g, b]) {
           const rn = r / 255, gn = g / 255, bn = b / 255;
           const k = 1 - Math.max(rn, gn, bn);
@@ -1058,15 +1081,13 @@ Light Green|#90ee90`.split("\n").map((entry) => {
 
         function closestName(color) {
           const lab = xyzToLab(rgbToXyz(color));
-          let best = colorNames[0], distance = Infinity;
-          for (const entry of colorNames) {
-            const hex = entry[1].slice(1);
-            const sample = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
-            const targetLab = xyzToLab(rgbToXyz(sample));
+          let best = colorNames[0][0], distance = Infinity;
+          for (let i = 0; i < colorNames.length; i++) {
+            const targetLab = colorNameLabs[i];
             const d = Math.hypot(lab[0] - targetLab[0], lab[1] - targetLab[1], lab[2] - targetLab[2]);
-            if (d < distance) { distance = d; best = entry; }
+            if (d < distance) { distance = d; best = colorNames[i][0]; }
           }
-          return best[0];
+          return best;
         }
 
         function updateUrlColor(hex) {
@@ -1080,13 +1101,14 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           const preservedGroup = preserveFormat ? preserveFormat.split("-")[0] : null;
           const preservedKeySet = new Set(preserveKeys);
           const write = (key, value) => {
-            const slider = document.querySelector(`[data-slider-for="${key}"]`);
+            const slider = sliderByKey.get(key);
             const isPreserved = preservedKeySet.has(key) || (preservedGroup && (key === preservedGroup || key.startsWith(`${preservedGroup}-`)));
             // Keep the pointer tracking during a drag; a clipped color can have less chroma than requested.
             if (slider && activeSliderKey !== key) slider.value = isPreserved ? $(key).value : value;
             if (!isPreserved) setValue(key, value);
           };
           const hex = hexFromRgb(rgb);
+<<<<<<< HEAD
           const { hsl, hsv, lch, oklch } = colorCoordinates();
           const cmyk = rgbToCmyk(rgb);
           const lchChromaSlider = document.querySelector('[data-slider-for="lch-c"]');
@@ -1101,16 +1123,31 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             oklchChromaSlider.max = maxOklchChroma(oklch[0], oklch[2]);
             oklchChromaSlider.step = "any";
           }
+=======
+          const hsl = rgbToHsl(rgb), hsv = rgbToHsv(rgb), lch = rgbToLch(rgb), oklch = rgbToOklch(rgb), cmyk = rgbToCmyk(rgb);
+>>>>>>> origin/main
           write("hex", hex);
           ["rgb-r", "rgb-g", "rgb-b"].forEach((key, i) => write(key, round(rgb[i])));
           ["hsl-h", "hsl-s", "hsl-l"].forEach((key, i) => write(key, round(hsl[i])));
           ["hsv-h", "hsv-s", "hsv-v"].forEach((key, i) => write(key, round(hsv[i])));
           write("lch-l", round(lch[0], 1));
-          write("lch-c", significant(lch[1]));
           write("lch-h", round(lch[2], 1));
           write("oklch-l", round(oklch[0], 1));
-          write("oklch-c", significant(oklch[1]));
           write("oklch-h", round(oklch[2], 1));
+          const lchChromaSlider = sliderByKey.get("lch-c");
+          const oklchChromaSlider = sliderByKey.get("oklch-c");
+          if (lchChromaSlider) {
+            lchChromaSlider.min = 0;
+            lchChromaSlider.max = cachedMaxChroma("lch", number("lch-l"), number("lch-h"), maxLchChroma);
+            lchChromaSlider.step = "any";
+          }
+          if (oklchChromaSlider) {
+            oklchChromaSlider.min = 0;
+            oklchChromaSlider.max = cachedMaxChroma("oklch", number("oklch-l"), number("oklch-h"), maxOklchChroma);
+            oklchChromaSlider.step = "any";
+          }
+          write("lch-c", significant(lch[1]));
+          write("oklch-c", significant(oklch[1]));
           ["cmyk-c", "cmyk-m", "cmyk-y", "cmyk-k"].forEach((key, i) => write(key, round(cmyk[i])));
           const color = hex.toLowerCase();
           $("swatch").style.backgroundColor = color;
@@ -1135,18 +1172,61 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
         }
 
+        function parseColorTokens(value) {
+          if (value.includes("/")) return null;
+          const tokens = value.trim().split(/[\s,]+/).filter(Boolean);
+          const parsed = tokens.map((token) => {
+            const match = token.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|grad|rad|turn|°)?$/i);
+            return match ? { value: Number(match[1]), unit: (match[2] || "").toLowerCase() } : null;
+          });
+          return parsed.length && parsed.every((part) => part && Number.isFinite(part.value)) ? parsed : null;
+        }
+
+        function colorComponent(part, percentReference = 100) {
+          if (part.unit === "%") return part.value * percentReference / 100;
+          return part.unit === "" ? part.value : null;
+        }
+
+        function colorHue(part) {
+          if (part.unit === "" || part.unit === "deg" || part.unit === "°") return part.value;
+          if (part.unit === "grad") return part.value * .9;
+          if (part.unit === "rad") return part.value * 180 / Math.PI;
+          if (part.unit === "turn") return part.value * 360;
+          return null;
+        }
+
         function parseFunctional(value) {
           const match = value.trim().match(/^(rgb|rgba|hsl|hsla|hsv|hsb|lch|oklch|cmyk)\(\s*([^)]*)\s*\)$/i);
           if (!match) return null;
           const format = match[1].toLowerCase();
-          const parts = match[2].replaceAll(",", " ").replaceAll("/", " ").trim().split(/\s+/).map((v) => parseFloat(v));
-          if (parts.length < (format.startsWith("cmyk") ? 4 : 3) || parts.some((n) => !Number.isFinite(n))) return null;
-          if (format.startsWith("rgb")) return parts.slice(0, 3).map((v) => clamp(v, 0, 255));
-          if (format.startsWith("hsl")) return hslToRgb(parts[0], parts[1], parts[2]);
-          if (format === "hsv" || format === "hsb") return hsvToRgb(parts[0], parts[1], parts[2]);
-          if (format === "lch") return lchToRgb(parts[0], parts[1], parts[2]);
-          if (format === "oklch") return oklchToRgb(parts[0], parts[1], parts[2]);
-          if (format === "cmyk") return cmykToRgb(...parts.slice(0, 4));
+          const parts = parseColorTokens(match[2]);
+          const expectedParts = format === "cmyk" ? 4 : 3;
+          if (!parts || parts.length !== expectedParts) return null;
+          if (format.startsWith("rgb")) {
+            const channels = parts.map((part) => colorComponent(part, 255));
+            return channels.every(Number.isFinite) ? channels.map((v) => clamp(v, 0, 255)) : null;
+          }
+          if (format.startsWith("hsl")) {
+            const [h, s, l] = [colorHue(parts[0]), colorComponent(parts[1]), colorComponent(parts[2])];
+            return [h, s, l].every(Number.isFinite) ? hslToRgb(h, s, l) : null;
+          }
+          if (format === "hsv" || format === "hsb") {
+            const [h, s, v] = [colorHue(parts[0]), colorComponent(parts[1]), colorComponent(parts[2])];
+            return [h, s, v].every(Number.isFinite) ? hsvToRgb(h, s, v) : null;
+          }
+          if (format === "lch") {
+            const [l, c, h] = [colorComponent(parts[0]), colorComponent(parts[1], 150), colorHue(parts[2])];
+            return [l, c, h].every(Number.isFinite) ? lchToRgb(l, c, h) : null;
+          }
+          if (format === "oklch") {
+            const l = parts[0].unit === "%" ? parts[0].value : parts[0].unit === "" ? parts[0].value * 100 : null;
+            const c = colorComponent(parts[1], .4), h = colorHue(parts[2]);
+            return [l, c, h].every(Number.isFinite) ? oklchToRgb(l, c, h) : null;
+          }
+          if (format === "cmyk") {
+            const values = parts.map((part) => colorComponent(part));
+            return values.every(Number.isFinite) ? cmykToRgb(...values) : null;
+          }
           return null;
         }
 
@@ -1155,32 +1235,30 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           const expectedParts = format === "cmyk" ? 4 : 3;
           if (!["rgb", "hsl", "hsv", "lch", "oklch", "cmyk"].includes(format)) return null;
 
-          const tokens = value.trim().split(/[\s,\/]+/).filter(Boolean);
-          if (tokens.length !== expectedParts) return null;
-          const values = [];
-          const units = [];
-          for (const token of tokens) {
-            const match = token.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|°)?$/i);
-            if (!match) return null;
-            values.push(Number(match[1]));
-            units.push((match[2] || "").toLowerCase());
-          }
-          if (values.some((part) => !Number.isFinite(part))) return null;
+          const parts = parseColorTokens(value);
+          if (!parts || parts.length !== expectedParts) return null;
 
           if (format === "rgb") {
-            const channels = values.map((part, i) => units[i] === "%" ? part * 2.55 : part);
-            return channels.every((part) => part >= 0 && part <= 255) ? channels : null;
+            const channels = parts.map((part) => colorComponent(part, 255));
+            return channels.every((part) => Number.isFinite(part) && part >= 0 && part <= 255) ? channels : null;
           }
           if (format === "hsl" || format === "hsv") {
-            if (values[1] < 0 || values[1] > 100 || values[2] < 0 || values[2] > 100) return null;
-            return format === "hsl" ? hslToRgb(...values) : hsvToRgb(...values);
+            const values = [colorHue(parts[0]), colorComponent(parts[1]), colorComponent(parts[2])];
+            if (!values.every(Number.isFinite)) return null;
+            const [h, s, v] = values;
+            if (s < 0 || s > 100 || v < 0 || v > 100) return null;
+            return format === "hsl" ? hslToRgb(h, s, v) : hsvToRgb(h, s, v);
           }
           if (format === "lch") {
-            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? lchToRgb(...values) : null;
+            const [l, c, h] = [colorComponent(parts[0]), colorComponent(parts[1], 150), colorHue(parts[2])];
+            return [l, c, h].every(Number.isFinite) && l >= 0 && l <= 100 && c >= 0 ? lchToRgb(l, c, h) : null;
           }
           if (format === "oklch") {
-            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? oklchToRgb(...values) : null;
+            const [l, c, h] = [colorComponent(parts[0]), colorComponent(parts[1], .4), colorHue(parts[2])];
+            return [l, c, h].every(Number.isFinite) && l >= 0 && l <= 100 && c >= 0 ? oklchToRgb(l, c, h) : null;
           }
+          const values = parts.map((part) => colorComponent(part));
+          if (!values.every(Number.isFinite)) return null;
           return values.every((part) => part >= 0 && part <= 100) ? cmykToRgb(...values) : null;
         }
 
@@ -1218,8 +1296,23 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         }
 
         function pasteColor(key, value) {
+<<<<<<< HEAD
           const hex = parseHex(value);
           const color = hex || parseFunctional(value) || parseBareFormat(key, value);
+=======
+          const trimmed = value.trim();
+          let color;
+          if (key === "hex") {
+            color = parseHex(value) || parseFunctional(value) || parseBareFormat(key, value);
+          } else if (trimmed.startsWith("#")) {
+            color = parseHex(value);
+          } else {
+            color = parseFunctional(value) || parseBareFormat(key, value);
+            if (!color && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) {
+              color = parseHex(value);
+            }
+          }
+>>>>>>> origin/main
           if (!color) return false;
           rememberInputHue(key, value, hex ? "hex" : inputFormat(key, value));
           rgb = color.map((v) => clamp(v, 0, 255));
@@ -1257,7 +1350,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           });
         });
 
-        document.querySelectorAll("[data-slider-for]").forEach((slider) => {
+        sliders.forEach((slider) => {
           slider.addEventListener("input", () => {
             const field = $(slider.dataset.sliderFor);
             activeSliderKey = slider.dataset.sliderFor;
