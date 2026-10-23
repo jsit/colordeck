@@ -1115,6 +1115,11 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           updateFields();
         }
 
+        function settleInputOnBlur(input) {
+          if (input.getAttribute("aria-invalid") === "true") return;
+          settleChromaChange(input.dataset.key);
+        }
+
         function parseHex(value) {
           const match = value.trim().match(/^#?([\da-f]{3}|[\da-f]{6})$/i);
           if (!match) return null;
@@ -1290,7 +1295,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             }
           });
           input.addEventListener("blur", () => {
-            settleChromaChange(input.dataset.key);
+            settleInputOnBlur(input);
           });
         });
 

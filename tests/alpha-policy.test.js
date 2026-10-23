@@ -29,6 +29,14 @@ function extractFunction(name, nextName, dependencies = []) {
 }
 
 const parseHex = extractFunction("parseHex", "parseFunctional");
+const blurHelperStart = script.indexOf("function settleInputOnBlur(");
+const blurHelperEnd = script.indexOf("function parseHex(", blurHelperStart);
+assert.notEqual(blurHelperStart, -1);
+assert.notEqual(blurHelperEnd, -1);
+const createSettleInputOnBlur = (settleChromaChange) => new Function(
+  "settleChromaChange",
+  `${script.slice(blurHelperStart, blurHelperEnd)}; return settleInputOnBlur;`,
+)(settleChromaChange); // eslint-disable-line no-new-func
 const parserStart = script.indexOf("function parseColorTokens(");
 const parserEnd = script.indexOf("function parseBareFormat(", parserStart);
 const parseFunctional = new Function(
@@ -57,4 +65,31 @@ test("functional parsing rejects alpha-bearing syntax", () => {
   assert.equal(parseFunctional("hsla(0, 100%, 50%, 0)"), null);
   assert.equal(parseFunctional("rgb(255 0 0 / 0)"), null);
   assert.equal(parseFunctional("hsl(0 100% 50% / 0)"), null);
+});
+
+test("rejected alpha HEX input remains available after blur", () => {
+  const settledKeys = [];
+  const settleOnBlur = createSettleInputOnBlur((key) => settledKeys.push(key));
+  const attributes = { "aria-invalid": "false" };
+  const input = {
+    value: "#FF000000",
+    dataset: { key: "hex" },
+    getAttribute: (name) => attributes[name],
+  };
+  if (!parseHex(input.value)) attributes["aria-invalid"] = "true";
+
+  settleOnBlur(input);
+  assert.deepEqual(settledKeys, []);
+  assert.equal(input.value, "#FF000000");
+  assert.equal(input.getAttribute("aria-invalid"), "true");
+  assert.match(script, /input\.addEventListener\("blur", \(\) => \{\s*settleInputOnBlur\(input\);/);
+});
+
+test("valid input still settles on blur", () => {
+  const settledKeys = [];
+  createSettleInputOnBlur((key) => settledKeys.push(key))({
+    dataset: { key: "hex" },
+    getAttribute: () => "false",
+  });
+  assert.deepEqual(settledKeys, ["hex"]);
 });
