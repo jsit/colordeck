@@ -972,7 +972,8 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         }
 
         function lchToRgb(l, c, h) {
-          return fitChromaToSrgb(c, (chroma) => lchRgbAtChroma(l, chroma, h));
+          l = clamp(l, 0, 100);
+          return fitChromaToSrgb(clamp(c, 0, 200), (chroma) => lchRgbAtChroma(l, chroma, h));
         }
 
         function maxLchChroma(l, h) {
@@ -1005,7 +1006,8 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         }
 
         function oklchToRgb(L, C, h) {
-          return fitChromaToSrgb(C, (chroma) => oklchRgbAtChroma(L, chroma, h));
+          L = clamp(L, 0, 100);
+          return fitChromaToSrgb(clamp(C, 0, .5), (chroma) => oklchRgbAtChroma(L, chroma, h));
         }
 
         function maxOklchChroma(L, h) {
@@ -1102,18 +1104,86 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
         }
 
+        function parseColorNumber(token) {
+          const match = token.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|°|grad|rad|turn)?$/i);
+          if (!match) return null;
+          const value = Number(match[1]);
+          return Number.isFinite(value) ? { value, unit: (match[2] || "").toLowerCase() } : null;
+        }
+
+        function hueInDegrees({ value, unit }) {
+          if (unit === "grad") return (value % 400) * .9;
+          if (unit === "rad") return (value % (2 * Math.PI)) * 180 / Math.PI;
+          if (unit === "turn") return (value % 1) * 360;
+          return value % 360;
+        }
+
+        function finiteColor(color) {
+          return Array.isArray(color) && color.length === 3 && color.every(Number.isFinite) ? color : null;
+        }
+
         function parseFunctional(value) {
           const match = value.trim().match(/^(rgb|rgba|hsl|hsla|hsv|hsb|lch|oklch|cmyk)\(\s*([^)]*)\s*\)$/i);
           if (!match) return null;
           const format = match[1].toLowerCase();
-          const parts = match[2].replaceAll(",", " ").replaceAll("/", " ").trim().split(/\s+/).map((v) => parseFloat(v));
-          if (parts.length < (format.startsWith("cmyk") ? 4 : 3) || parts.some((n) => !Number.isFinite(n))) return null;
-          if (format.startsWith("rgb")) return parts.slice(0, 3).map((v) => clamp(v, 0, 255));
-          if (format.startsWith("hsl")) return hslToRgb(parts[0], parts[1], parts[2]);
-          if (format === "hsv" || format === "hsb") return hsvToRgb(parts[0], parts[1], parts[2]);
-          if (format === "lch") return lchToRgb(parts[0], parts[1], parts[2]);
-          if (format === "oklch") return oklchToRgb(parts[0], parts[1], parts[2]);
-          if (format === "cmyk") return cmykToRgb(...parts.slice(0, 4));
+          const count = format === "cmyk" ? 4 : 3;
+          const supportsAlpha = ["rgb", "rgba", "hsl", "hsla", "lch", "oklch"].includes(format);
+          const body = match[2].trim();
+          let tokens, alphaToken = null;
+          if (body.includes(",")) {
+            if (body.includes("/")) return null;
+            const groups = body.split(",");
+            if (groups.length !== count && (!supportsAlpha || groups.length !== count + 1)) return null;
+            if (groups.some((group) => group.trim().split(/\s+/).length !== 1)) return null;
+            tokens = groups.map((group) => group.trim());
+            if (tokens.length === count + 1) alphaToken = tokens.pop();
+          } else if (body.includes("/")) {
+            const groups = body.split("/");
+            if (groups.length !== 2 || !supportsAlpha) return null;
+            tokens = groups[0].trim().split(/\s+/);
+            const alpha = groups[1].trim().split(/\s+/);
+            if (alpha.length !== 1) return null;
+            alphaToken = alpha[0];
+          } else {
+            tokens = body.split(/\s+/);
+          }
+          if (tokens.length !== count) return null;
+          const parts = tokens.map(parseColorNumber);
+          if (parts.some((part) => !part)) return null;
+          if (alphaToken !== null) {
+            const alpha = parseColorNumber(alphaToken);
+            if (!alpha || (alpha.unit !== "" && alpha.unit !== "%")) return null;
+          }
+
+          if (format === "rgb" || format === "rgba") {
+            if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
+            return finiteColor(parts.map(({ value, unit }) => clamp(unit === "%" ? value * 2.55 : value, 0, 255)));
+          }
+          if (format === "hsl" || format === "hsla") {
+            if (!["", "deg", "°", "grad", "rad", "turn"].includes(parts[0].unit) || parts[1].unit !== "%" || parts[2].unit !== "%") return null;
+            return finiteColor(hslToRgb(hueInDegrees(parts[0]), clamp(parts[1].value, 0, 100), clamp(parts[2].value, 0, 100)));
+          }
+          if (format === "hsv" || format === "hsb") {
+            if (!["", "deg", "°", "grad", "rad", "turn"].includes(parts[0].unit) || parts.slice(1).some((part) => part.unit !== "" && part.unit !== "%")) return null;
+            return finiteColor(hsvToRgb(hueInDegrees(parts[0]), clamp(parts[1].value, 0, 100), clamp(parts[2].value, 0, 100)));
+          }
+          if (format === "lch" || format === "oklch") {
+            if (parts.some((part, i) => i === 0 || i === 1
+              ? part.unit !== "" && part.unit !== "%"
+              : !["", "deg", "°", "grad", "rad", "turn"].includes(part.unit))) return null;
+            const lightness = parts[0].value;
+            const chroma = parts[1].unit === "%"
+              ? parts[1].value * (format === "lch" ? 1.5 : .004)
+              : parts[1].value;
+            const hue = hueInDegrees(parts[2]);
+            return finiteColor(format === "lch"
+              ? lchToRgb(lightness, Math.max(0, chroma), hue)
+              : oklchToRgb(lightness, Math.max(0, chroma), hue));
+          }
+          if (format === "cmyk") {
+            if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
+            return finiteColor(cmykToRgb(...parts.map(({ value }) => clamp(value, 0, 100))));
+          }
           return null;
         }
 
@@ -1122,33 +1192,40 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           const expectedParts = format === "cmyk" ? 4 : 3;
           if (!["rgb", "hsl", "hsv", "lch", "oklch", "cmyk"].includes(format)) return null;
 
-          const tokens = value.trim().split(/[\s,\/]+/).filter(Boolean);
+          if (value.includes("/")) return null;
+          const tokens = value.trim().split(/[\s,]+/).filter(Boolean);
           if (tokens.length !== expectedParts) return null;
-          const values = [];
-          const units = [];
+          const parts = [];
           for (const token of tokens) {
-            const match = token.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|°)?$/i);
-            if (!match) return null;
-            values.push(Number(match[1]));
-            units.push((match[2] || "").toLowerCase());
+            const part = parseColorNumber(token);
+            if (!part || ["grad", "rad", "turn"].includes(part.unit)) return null;
+            parts.push(part);
           }
-          if (values.some((part) => !Number.isFinite(part))) return null;
+          const values = parts.map(({ value: part }) => part);
 
           if (format === "rgb") {
-            const channels = values.map((part, i) => units[i] === "%" ? part * 2.55 : part);
-            return channels.every((part) => part >= 0 && part <= 255) ? channels : null;
+            if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
+            const channels = parts.map(({ value, unit }) => unit === "%" ? value * 2.55 : value);
+            return channels.every((part) => Number.isFinite(part) && part >= 0 && part <= 255) ? channels : null;
           }
           if (format === "hsl" || format === "hsv") {
+            if (!["", "deg", "°"].includes(parts[0].unit) || parts.slice(1).some((part) => part.unit !== "" && part.unit !== "%")) return null;
             if (values[1] < 0 || values[1] > 100 || values[2] < 0 || values[2] > 100) return null;
-            return format === "hsl" ? hslToRgb(...values) : hsvToRgb(...values);
+            values[0] = hueInDegrees(parts[0]);
+            return finiteColor(format === "hsl" ? hslToRgb(...values) : hsvToRgb(...values));
           }
           if (format === "lch") {
-            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? lchToRgb(...values) : null;
+            if ((parts[0].unit !== "" && parts[0].unit !== "%") || parts[1].unit !== "" || !["", "deg", "°"].includes(parts[2].unit)) return null;
+            values[2] = hueInDegrees(parts[2]);
+            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? finiteColor(lchToRgb(...values)) : null;
           }
           if (format === "oklch") {
-            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? oklchToRgb(...values) : null;
+            if ((parts[0].unit !== "" && parts[0].unit !== "%") || parts[1].unit !== "" || !["", "deg", "°"].includes(parts[2].unit)) return null;
+            values[2] = hueInDegrees(parts[2]);
+            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? finiteColor(oklchToRgb(...values)) : null;
           }
-          return values.every((part) => part >= 0 && part <= 100) ? cmykToRgb(...values) : null;
+          if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
+          return values.every((part) => part >= 0 && part <= 100) ? finiteColor(cmykToRgb(...values)) : null;
         }
 
         function rgbFromInput(key) {
@@ -1163,23 +1240,25 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           }
           if (key.startsWith("hsl-")) {
             const vals = ["hsl-h", "hsl-s", "hsl-l"].map(number);
-            return vals.every(Number.isFinite) && vals[1] >= 0 && vals[1] <= 100 && vals[2] >= 0 && vals[2] <= 100 ? hslToRgb(...vals) : null;
+            return vals.every(Number.isFinite) && vals[1] >= 0 && vals[1] <= 100 && vals[2] >= 0 && vals[2] <= 100 ? finiteColor(hslToRgb(...vals)) : null;
           }
           if (key.startsWith("hsv-")) {
             const vals = ["hsv-h", "hsv-s", "hsv-v"].map(number);
-            return vals.every(Number.isFinite) && vals[1] >= 0 && vals[1] <= 100 && vals[2] >= 0 && vals[2] <= 100 ? hsvToRgb(...vals) : null;
+            return vals.every(Number.isFinite) && vals[1] >= 0 && vals[1] <= 100 && vals[2] >= 0 && vals[2] <= 100 ? finiteColor(hsvToRgb(...vals)) : null;
           }
           if (key.startsWith("lch-")) {
             const vals = ["lch-l", "lch-c", "lch-h"].map(number);
-            return vals.every(Number.isFinite) && vals[0] >= 0 && vals[0] <= 100 && vals[1] >= 0 ? lchToRgb(...vals) : null;
+            vals[2] = hueInDegrees({ value: vals[2], unit: "" });
+            return vals.every(Number.isFinite) && vals[0] >= 0 && vals[0] <= 100 && vals[1] >= 0 ? finiteColor(lchToRgb(...vals)) : null;
           }
           if (key.startsWith("oklch-")) {
             const vals = ["oklch-l", "oklch-c", "oklch-h"].map(number);
-            return vals.every(Number.isFinite) && vals[0] >= 0 && vals[0] <= 100 && vals[1] >= 0 ? oklchToRgb(...vals) : null;
+            vals[2] = hueInDegrees({ value: vals[2], unit: "" });
+            return vals.every(Number.isFinite) && vals[0] >= 0 && vals[0] <= 100 && vals[1] >= 0 ? finiteColor(oklchToRgb(...vals)) : null;
           }
           if (key.startsWith("cmyk-")) {
             const vals = ["cmyk-c", "cmyk-m", "cmyk-y", "cmyk-k"].map(number);
-            return vals.every(Number.isFinite) && vals.every((v) => v >= 0 && v <= 100) ? cmykToRgb(...vals) : null;
+            return vals.every(Number.isFinite) && vals.every((v) => v >= 0 && v <= 100) ? finiteColor(cmykToRgb(...vals)) : null;
           }
           return null;
         }
