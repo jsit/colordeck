@@ -4,7 +4,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
-const script = html.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+const script = html.match(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/i)[1];
 
 function extractFunction(name, nextName, dependencies = []) {
   const start = script.indexOf(`function ${name}(`);
