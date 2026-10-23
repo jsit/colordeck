@@ -1166,6 +1166,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
 
           if (format === "rgb" || format === "rgba") {
             if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
+            if (body.includes(",") && parts.some((part) => part.unit !== parts[0].unit)) return null;
             return finiteColor(parts.map(({ value, unit }) => unit === "%"
               ? clamp(value, 0, 100) * 2.55
               : clamp(value, 0, 255)));
