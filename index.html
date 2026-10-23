@@ -1152,6 +1152,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           let tokens;
           if (body.includes("/")) return null;
           if (body.includes(",")) {
+            if (format === "lch" || format === "oklch") return null;
             const groups = body.split(",");
             if (groups.length !== count) return null;
             if (groups.some((group) => group.trim().split(/\s+/).length !== 1)) return null;
