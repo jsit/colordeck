@@ -37,7 +37,10 @@ test("functional color syntax accepts supported forms and normalizes values", ()
     ["rgb(50% 0% 0%)", [127.5, 0, 0]],
     ["rgb(255 255 100%)", [255, 255, 255]],
     ["hsl(120, 100%, 50%)", [0, 255, 0]],
+    ["hsl(120 100 50)", [0, 255, 0]],
+    ["hsl(120 100% 50)", [0, 255, 0]],
     ["hsla(480deg 100% 50%)", [0, 255, 0]],
+    ["hsla(120 100 50%)", [0, 255, 0]],
     ["hsl(120 150% -10%)", [0, 0, 0]],
     ["hsv(120 100% 100%)", [0, 255, 0]],
     ["lch(50% 40 30deg)", null],
@@ -51,6 +54,7 @@ test("functional color syntax accepts supported forms and normalizes values", ()
     if (expected) closeTo(actual, expected);
     else assert.ok(actual?.every(Number.isFinite), `expected finite output for ${input}`);
   }
+  closeTo(parseFunctional("hsl(20 30% 40)"), parseFunctional("hsl(20 30% 40%)"));
   const expectedHue = parseFunctional("hsl(180deg 100% 50%)");
   for (const hue of ["0.5turn", `${Math.PI}rad`, "200grad"]) {
     closeTo(parseFunctional(`hsl(${hue} 100% 50%)`), expectedHue);
@@ -71,7 +75,8 @@ test("functional color syntax rejects malformed tokens, separators, counts, and 
     "rgb(1,,3)",
     "rgb(1deg 2 3)",
     "hsl(20 30deg 40%)",
-    "hsl(20 30% 40)",
+    "hsl(120, 100, 50)",
+    "hsla(120, 100, 50)",
     "hsv(20 30% 40% / .5)",
     "lch(50% 30deg 20deg)",
     "cmyk(0 0 0 0 / .5)",

@@ -1172,7 +1172,10 @@ Light Green|#90ee90`.split("\n").map((entry) => {
               : clamp(value, 0, 255)));
           }
           if (format === "hsl" || format === "hsla") {
-            if (!["", "deg", "°", "grad", "rad", "turn"].includes(parts[0].unit) || parts[1].unit !== "%" || parts[2].unit !== "%") return null;
+            if (!["", "deg", "°", "grad", "rad", "turn"].includes(parts[0].unit)) return null;
+            if (body.includes(",")
+              ? parts.slice(1).some((part) => part.unit !== "%")
+              : parts.slice(1).some((part) => part.unit !== "" && part.unit !== "%")) return null;
             return finiteColor(hslToRgb(hueInDegrees(parts[0]), clamp(parts[1].value, 0, 100), clamp(parts[2].value, 0, 100)));
           }
           if (format === "hsv" || format === "hsb") {
