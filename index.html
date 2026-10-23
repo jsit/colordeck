@@ -123,7 +123,7 @@
             <p class="eyebrow">No notes. Just colors.</p>
             <h1 id="page-title">Color, translated.</h1>
           </div>
-          <p class="intro-copy">Paste a color. Fiddle with the numbers. They all move. This is a slop-coded black box; the copy buttons work, and that is enough.</p>
+          <p class="intro-copy">Paste a color. Fiddle with the numbers. They all move. This is a slop-coded black box; the copy buttons work, and that is enough. Alpha/transparency is not supported; inputs containing it are rejected.</p>
         </section>
 
         <section class="preview" aria-label="Color preview">
@@ -139,7 +139,7 @@
           <div class="formats">
             <article class="format-card hex-card" data-format="hex">
               <div class="format-top"><h3 class="format-title" id="hex-title">Hex <span class="format-tag">HEX</span></h3><button class="copy-button" type="button" aria-label="Copy hex value" data-copy="hex"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
-              <fieldset class="component-fields" aria-labelledby="hex-title"><div class="field-row one"><div class="field"><label for="hex">Hexadecimal</label><input id="hex" data-key="hex" type="text" value="#5B8C76" spellcheck="false" autocomplete="off" /></div></div></fieldset><p class="hint">3, 6, or 8 digit hex</p>
+              <fieldset class="component-fields" aria-labelledby="hex-title"><div class="field-row one"><div class="field"><label for="hex">Hexadecimal</label><input id="hex" data-key="hex" type="text" value="#5B8C76" spellcheck="false" autocomplete="off" /></div></div></fieldset><p class="hint">3 or 6 digit hex; transparency is not supported</p>
             </article>
 
             <article class="format-card" data-format="rgb">
@@ -850,6 +850,8 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [entry.slice(0, separator), entry.slice(separator + 1)];
         });
         let rgb = [91, 140, 118];
+        let hexEditRgb = null;
+        const retainedHues = { hsl: null, hsv: null, lch: null, oklch: null };
         let activeSliderKey = null;
         let urlSyncReady = false;
         let toastTimer;
@@ -865,6 +867,37 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         const round = (value, places = 0) => Number(value.toFixed(places));
         const significant = (value, digits = 4) => Number(value.toPrecision(digits));
         const hexFromRgb = ([r, g, b]) => "#" + [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("").toUpperCase();
+        const normalizedHue = (hue) => ((hue % 360) + 360) % 360;
+        const hueTolerance = 0.0001;
+
+        function retainHue(model, hue, powerless) {
+          if (!powerless) retainedHues[model] = hue;
+          else if (retainedHues[model] === null) retainedHues[model] = 0;
+          return powerless ? retainedHues[model] : hue;
+        }
+
+        function colorCoordinates() {
+          const hsl = rgbToHsl(rgb), hsv = rgbToHsv(rgb), lch = rgbToLch(rgb), oklch = rgbToOklch(rgb);
+          hsl[0] = retainHue("hsl", hsl[0], hsl[1] <= hueTolerance || hsl[2] <= hueTolerance || hsl[2] >= 100 - hueTolerance);
+          hsv[0] = retainHue("hsv", hsv[0], hsv[1] <= hueTolerance || hsv[2] <= hueTolerance);
+          lch[2] = retainHue("lch", lch[2], lch[1] <= hueTolerance);
+          oklch[2] = retainHue("oklch", oklch[2], oklch[1] <= hueTolerance);
+          return { hsl, hsv, lch, oklch };
+        }
+
+        function inputFormat(key, value) {
+          const functional = value.trim().match(/^(rgb|rgba|hsl|hsla|hsv|hsb|lch|oklch|cmyk)\(/i);
+          return functional ? functional[1].toLowerCase().replace("hsb", "hsv").replace("hsla", "hsl").replace("rgba", "rgb") : key.split("-")[0];
+        }
+
+        function rememberInputHue(key, value, format, scalar = false) {
+          if (!["hsl", "hsv", "lch", "oklch"].includes(format)) return;
+          const functional = value.trim().match(/^(hsl|hsla|hsv|hsb|lch|oklch)\(\s*([^)]*)\s*\)$/i);
+          const parts = scalar ? null : parseColorTokens(functional ? functional[2] : value);
+          const hueIndex = format === "hsl" || format === "hsv" ? 0 : 2;
+          const hue = scalar ? Number(value.trim()) : (parts?.[hueIndex] ? colorHue(parts[hueIndex]) : NaN);
+          if (Number.isFinite(hue)) retainedHues[format] = normalizedHue(hue);
+        }
 
         function rgbToHsl([r, g, b]) {
           r /= 255; g /= 255; b /= 255;
@@ -1078,7 +1111,8 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             if (!isPreserved) setValue(key, value);
           };
           const hex = hexFromRgb(rgb);
-          const hsl = rgbToHsl(rgb), hsv = rgbToHsv(rgb), lch = rgbToLch(rgb), oklch = rgbToOklch(rgb), cmyk = rgbToCmyk(rgb);
+          const { hsl, hsv, lch, oklch } = colorCoordinates();
+          const cmyk = rgbToCmyk(rgb);
           write("hex", hex);
           ["rgb-r", "rgb-g", "rgb-b"].forEach((key, i) => write(key, round(rgb[i])));
           ["hsl-h", "hsl-s", "hsl-l"].forEach((key, i) => write(key, round(hsl[i])));
@@ -1117,11 +1151,16 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           updateFields();
         }
 
+        function settleInputOnBlur(input) {
+          if (input.getAttribute("aria-invalid") === "true") return;
+          settleChromaChange(input.dataset.key);
+        }
+
         function parseHex(value) {
-          const match = value.trim().match(/^#?([\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i);
+          const match = value.trim().match(/^#?([\da-f]{3}|[\da-f]{6})$/i);
           if (!match) return null;
           let hex = match[1];
-          if (hex.length <= 4) hex = [...hex].map((char) => char + char).join("");
+          if (hex.length === 3) hex = [...hex].map((char) => char + char).join("");
           return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
         }
 
@@ -1130,6 +1169,21 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           if (!match) return null;
           const value = Number(match[1]);
           return Number.isFinite(value) ? { value, unit: (match[2] || "").toLowerCase() } : null;
+        }
+
+        function parseColorTokens(value) {
+          if (value.includes("/")) return null;
+          const tokens = value.trim().split(/[\s,]+/).filter(Boolean);
+          const parsed = tokens.map(parseColorNumber);
+          return parsed.length && parsed.every(Boolean) ? parsed : null;
+        }
+
+        function colorHue(part) {
+          if (part.unit === "" || part.unit === "deg" || part.unit === "°") return part.value;
+          if (part.unit === "grad") return part.value * .9;
+          if (part.unit === "rad") return part.value * 180 / Math.PI;
+          if (part.unit === "turn") return part.value * 360;
+          return null;
         }
 
         function hueInDegrees({ value, unit }) {
@@ -1147,6 +1201,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           const match = value.trim().match(/^(rgb|rgba|hsl|hsla|hsv|hsb|lch|oklch|cmyk)\(\s*([^)]*)\s*\)$/i);
           if (!match) return null;
           const format = match[1].toLowerCase();
+          if (format === "rgba" || format === "hsla") return null;
           const count = format === "cmyk" ? 4 : 3;
           const body = match[2].trim();
           let tokens;
@@ -1252,7 +1307,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         function rgbFromInput(key) {
           if (key === "hex") {
             // Avoid expanding shorthand while someone is still typing a longer hex value.
-            if (!/^#?[\da-f]{6}(?:[\da-f]{2})?$/i.test($(key).value.trim())) return null;
+            if (!/^#?[\da-f]{6}$/i.test($(key).value.trim())) return null;
             return parseHex($(key).value);
           }
           if (key.startsWith("rgb-")) {
@@ -1284,50 +1339,89 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return null;
         }
 
-        function pasteColor(key, value) {
-          const trimmed = value.trim();
-          let color;
-          if (key === "hex") {
-            color = parseHex(value) || parseFunctional(value) || parseBareFormat(key, value);
-          } else if (trimmed.startsWith("#")) {
-            color = parseHex(value);
-          } else {
-            color = parseFunctional(value) || parseBareFormat(key, value);
-            if (!color && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) {
-              color = parseHex(value);
+        function handleInput(input) {
+          const key = input.dataset.key;
+          const reject = () => {
+            input.setAttribute("aria-invalid", "true");
+            if (key === "hex" && hexEditRgb) {
+              rgb = hexEditRgb.slice();
+              updateFields(key);
             }
+          };
+          if (input.value.trim() === "") { reject(); return; }
+          const pastedFormat = parseFunctional(input.value) || parseBareFormat(key, input.value);
+          if (pastedFormat) {
+            rememberInputHue(key, input.value, inputFormat(key, input.value));
+            rgb = pastedFormat.map((v) => clamp(v, 0, 255));
+            updateFields();
+            return;
           }
-          if (!color) return false;
-          rgb = color.map((v) => clamp(v, 0, 255));
+          const next = rgbFromInput(key);
+          if (next) {
+            if (key.endsWith("-h")) rememberInputHue(key, input.value, key.split("-")[0], true);
+            rgb = next.map((v) => clamp(v, 0, 255));
+            input.setAttribute("aria-invalid", "false");
+            updateFields(key);
+          } else {
+            reject();
+          }
+        }
+
+        function commitHexShorthand() {
+          const value = $("hex").value.trim();
+          if (!/^#?[\da-f]{3}$/i.test(value)) return false;
+          rgb = parseHex(value);
           updateFields();
           return true;
         }
 
+        function pasteColor(key, value) {
+          const trimmed = value.trim();
+          let color;
+          let hex = null;
+          if (key === "hex") {
+            hex = parseHex(value);
+            color = hex || parseFunctional(value) || parseBareFormat(key, value);
+          } else if (trimmed.startsWith("#")) {
+            hex = parseHex(value);
+            color = hex;
+          } else {
+            color = parseFunctional(value) || parseBareFormat(key, value);
+            if (!color && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) {
+              hex = parseHex(value);
+              color = hex;
+            }
+          }
+          if (!color) return false;
+          rememberInputHue(key, value, hex ? "hex" : inputFormat(key, value));
+          rgb = color.map((v) => clamp(v, 0, 255));
+          updateFields();
+          if (key === "hex") hexEditRgb = rgb.slice();
+          return true;
+        }
+
         inputs.forEach((input) => {
+          input.addEventListener("focus", () => {
+            if (input.dataset.key === "hex") hexEditRgb = rgb.slice();
+          });
           input.addEventListener("paste", (event) => {
             const pasted = event.clipboardData?.getData("text") || "";
             if (pasteColor(input.dataset.key, pasted)) event.preventDefault();
           });
-          input.addEventListener("input", () => {
-            const key = input.dataset.key;
-            if (input.value.trim() === "") { input.setAttribute("aria-invalid", "true"); return; }
-            const pastedFormat = parseFunctional(input.value) || parseBareFormat(key, input.value);
-            if (pastedFormat) {
-              rgb = pastedFormat.map((v) => clamp(v, 0, 255));
-              updateFields();
-              return;
-            }
-            const next = rgbFromInput(key);
-            if (next) {
-              rgb = next.map((v) => clamp(v, 0, 255));
-              input.setAttribute("aria-invalid", "false");
-              updateFields(key);
-            } else {
-              input.setAttribute("aria-invalid", "true");
+          input.addEventListener("input", () => handleInput(input));
+          input.addEventListener("keydown", (event) => {
+            if (input.dataset.key === "hex" && event.key === "Enter" && commitHexShorthand()) {
+              event.preventDefault();
+              hexEditRgb = rgb.slice();
             }
           });
           input.addEventListener("blur", () => {
-            settleChromaChange(input.dataset.key);
+            if (input.dataset.key === "hex" && commitHexShorthand()) {
+              input.setAttribute("aria-invalid", "false");
+            } else {
+              settleInputOnBlur(input);
+            }
+            if (input.dataset.key === "hex") hexEditRgb = null;
           });
         });
 
@@ -1350,10 +1444,10 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         const copyValues = {
           hex: () => hexFromRgb(rgb),
           rgb: () => `rgb(${rgb.map(Math.round).join(" ")})`,
-          hsl: () => { const v = rgbToHsl(rgb); return `hsl(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
-          hsv: () => { const v = rgbToHsv(rgb); return `hsv(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
-          lch: () => { const v = rgbToLch(rgb); return `lch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
-          oklch: () => { const v = rgbToOklch(rgb); return `oklch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
+          hsl: () => { const v = colorCoordinates().hsl; return `hsl(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
+          hsv: () => { const v = colorCoordinates().hsv; return `hsv(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
+          lch: () => { const v = colorCoordinates().lch; return `lch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
+          oklch: () => { const v = colorCoordinates().oklch; return `oklch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
           cmyk: () => `cmyk(${rgbToCmyk(rgb).map((v) => round(v)).join(" ")})`
         };
 
