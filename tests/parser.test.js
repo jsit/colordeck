@@ -4,8 +4,12 @@ import test from "node:test";
 import vm from "node:vm";
 
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-const script = html.match(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/i)?.[1];
-assert.ok(script, "index.html should contain the application script");
+const lowerHtml = html.toLowerCase();
+const scriptTagStart = lowerHtml.indexOf("<script");
+const scriptBodyStart = html.indexOf(">", scriptTagStart) + 1;
+const scriptEnd = lowerHtml.indexOf("</script", scriptBodyStart);
+assert.ok(scriptTagStart !== -1 && scriptBodyStart > 0 && scriptEnd !== -1, "index.html should contain the application script");
+const script = html.slice(scriptBodyStart, scriptEnd);
 const start = script.indexOf("const clamp =");
 const end = script.indexOf("inputs.forEach", start);
 assert.ok(start !== -1 && end !== -1, "parser functions should be present in the application script");
