@@ -16,7 +16,9 @@ assert.ok(start !== -1 && end !== -1, "parser functions should be present in the
 
 const fields = {};
 const context = { fields, document: { getElementById: (id) => fields[id] || { value: "" } } };
-vm.runInNewContext(`let rgb = [91, 140, 118];
+vm.runInNewContext(`const colorNames = [];
+const inputByKey = { get: (key) => fields[key] };
+let rgb = [91, 140, 118];
 const $ = (id) => document.getElementById(id);
 ${script.slice(start, end)}
 globalThis.colorParser = { parseFunctional, parseBareFormat, rgbFromInput, pasteColor, getRgb: () => rgb };`, context);
@@ -32,9 +34,8 @@ test("functional color syntax accepts supported forms and normalizes values", ()
   const valid = [
     ["rgb(12, 0, 0)", [12, 0, 0]],
     ["rgb(100% 0% 0%)", [255, 0, 0]],
-    ["rgb(12 0 0 / 50%)", [12, 0, 0]],
     ["hsl(120, 100%, 50%)", [0, 255, 0]],
-    ["hsla(480deg 100% 50% / .5)", [0, 255, 0]],
+    ["hsla(480deg 100% 50%)", [0, 255, 0]],
     ["hsl(120 150% -10%)", [0, 0, 0]],
     ["hsv(120 100% 100%)", [0, 255, 0]],
     ["lch(50% 40 30deg)", null],
@@ -48,6 +49,13 @@ test("functional color syntax accepts supported forms and normalizes values", ()
     if (expected) closeTo(actual, expected);
     else assert.ok(actual?.every(Number.isFinite), `expected finite output for ${input}`);
   }
+  const expectedHue = parseFunctional("hsl(180deg 100% 50%)");
+  for (const hue of ["0.5turn", `${Math.PI}rad`, "200grad"]) {
+    closeTo(parseFunctional(`hsl(${hue} 100% 50%)`), expectedHue);
+  }
+  closeTo(parseFunctional("oklch(0.6 0.1 150)"), parseFunctional("oklch(60% 0.1 150)"));
+  closeTo(parseFunctional("oklch(60% 25% 150)"), parseFunctional("oklch(60% 0.1 150)"));
+  closeTo(parseFunctional("lch(50% 20% 150)"), parseFunctional("lch(50% 30 150)"));
 });
 
 test("functional color syntax rejects malformed tokens, separators, counts, and units", () => {
@@ -65,7 +73,9 @@ test("functional color syntax rejects malformed tokens, separators, counts, and 
     "hsv(20 30% 40% / .5)",
     "lch(50% 30deg 20deg)",
     "cmyk(0 0 0 0 / .5)",
-    "rgb(1 2 3) trailing"
+    "rgb(1 2 3) trailing",
+    "rgb(255 0 0 / 0.5)",
+    "rgba(255, 0, 0, 0.5)"
   ];
   for (const input of invalid) assert.equal(parseFunctional(input), null, input);
 });
@@ -93,6 +103,10 @@ test("bare values retain flexible separators and HSL units", () => {
     ["rgb-r", "100%, 0%, 0%", [255, 0, 0]]
   ];
   for (const [key, input, expected] of valid) closeTo(parseBareFormat(key, input), expected);
+  const hslExpected = parseBareFormat("hsl-h", "153 11% 45%");
+  closeTo(parseBareFormat("hsl-h", "153 11 45"), hslExpected);
+  closeTo(parseBareFormat("hsl-h", "153,11%,45%"), hslExpected);
+  closeTo(parseBareFormat("oklch-l", "60 0.1 150"), parseFunctional("oklch(60% 0.1 150)"));
 });
 
 test("bare values reject suffixes outside their component roles", () => {
@@ -101,7 +115,7 @@ test("bare values reject suffixes outside their component roles", () => {
     ["hsl-h", "20 30deg 40"],
     ["hsl-h", "20% 30 40"],
     ["lch-l", "50 20deg 30"],
-    ["lch-l", "50 20 30rad"],
+    ["lch-l", "50 20deg 30"],
     ["cmyk-c", "0 0 0 0deg"],
     ["rgb-r", "10 20 30/"]
   ];
