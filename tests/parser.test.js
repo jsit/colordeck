@@ -4,7 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+const script = html.match(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/i)?.[1];
 assert.ok(script, "index.html should contain the application script");
 const start = script.indexOf("const clamp =");
 const end = script.indexOf("inputs.forEach", start);
