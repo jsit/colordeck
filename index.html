@@ -846,6 +846,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [entry.slice(0, separator), entry.slice(separator + 1)];
         });
         let rgb = [91, 140, 118];
+        const retainedHues = { hsl: null, hsv: null, lch: null, oklch: null };
         let activeSliderKey = null;
         let urlSyncReady = false;
         let toastTimer;
@@ -856,6 +857,37 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         const round = (value, places = 0) => Number(value.toFixed(places));
         const significant = (value, digits = 4) => Number(value.toPrecision(digits));
         const hexFromRgb = ([r, g, b]) => "#" + [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("").toUpperCase();
+        const normalizedHue = (hue) => ((hue % 360) + 360) % 360;
+        const hueTolerance = 0.0001;
+
+        function retainHue(model, hue, powerless) {
+          if (!powerless) retainedHues[model] = hue;
+          else if (retainedHues[model] === null) retainedHues[model] = 0;
+          return powerless ? retainedHues[model] : hue;
+        }
+
+        function colorCoordinates() {
+          const hsl = rgbToHsl(rgb), hsv = rgbToHsv(rgb), lch = rgbToLch(rgb), oklch = rgbToOklch(rgb);
+          hsl[0] = retainHue("hsl", hsl[0], hsl[1] <= hueTolerance || hsl[2] <= hueTolerance || hsl[2] >= 100 - hueTolerance);
+          hsv[0] = retainHue("hsv", hsv[0], hsv[1] <= hueTolerance || hsv[2] <= hueTolerance);
+          lch[2] = retainHue("lch", lch[2], lch[1] <= hueTolerance);
+          oklch[2] = retainHue("oklch", oklch[2], oklch[1] <= hueTolerance);
+          return { hsl, hsv, lch, oklch };
+        }
+
+        function rememberInputHue(key, value) {
+          const functional = value.trim().match(/^(hsl|hsla|hsv|hsb|lch|oklch)\(\s*([^)]*)\s*\)$/i);
+          const format = functional ? functional[1].toLowerCase().replace("hsb", "hsv").replace("hsla", "hsl") : key.split("-")[0];
+          const hueIndex = functional
+            ? format === "hsl" || format === "hsv" ? 0 : 2
+            : key.endsWith("-h") ? 0
+              : format === "lch" || format === "oklch" ? 2
+                : format === "hsl" || format === "hsv" ? 0 : -1;
+          if (hueIndex < 0) return;
+          const parts = (functional ? functional[2] : value).replaceAll(",", " ").replaceAll("/", " ").trim().split(/\s+/);
+          const hue = parseFloat(parts[hueIndex]);
+          if (Number.isFinite(hue)) retainedHues[format] = normalizedHue(hue);
+        }
 
         function rgbToHsl([r, g, b]) {
           r /= 255; g /= 255; b /= 255;
@@ -1055,7 +1087,8 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             if (!isPreserved) setValue(key, value);
           };
           const hex = hexFromRgb(rgb);
-          const hsl = rgbToHsl(rgb), hsv = rgbToHsv(rgb), lch = rgbToLch(rgb), oklch = rgbToOklch(rgb), cmyk = rgbToCmyk(rgb);
+          const { hsl, hsv, lch, oklch } = colorCoordinates();
+          const cmyk = rgbToCmyk(rgb);
           const lchChromaSlider = document.querySelector('[data-slider-for="lch-c"]');
           const oklchChromaSlider = document.querySelector('[data-slider-for="oklch-c"]');
           if (lchChromaSlider) {
@@ -1187,6 +1220,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         function pasteColor(key, value) {
           const color = parseHex(value) || parseFunctional(value) || parseBareFormat(key, value);
           if (!color) return false;
+          rememberInputHue(key, value);
           rgb = color.map((v) => clamp(v, 0, 255));
           updateFields();
           return true;
@@ -1202,12 +1236,14 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             if (input.value.trim() === "") { input.setAttribute("aria-invalid", "true"); return; }
             const pastedFormat = parseFunctional(input.value) || parseBareFormat(key, input.value);
             if (pastedFormat) {
+              rememberInputHue(key, input.value);
               rgb = pastedFormat.map((v) => clamp(v, 0, 255));
               updateFields();
               return;
             }
             const next = rgbFromInput(key);
             if (next) {
+              if (key.endsWith("-h")) rememberInputHue(key, input.value);
               rgb = next.map((v) => clamp(v, 0, 255));
               input.setAttribute("aria-invalid", "false");
               updateFields(key);
@@ -1239,10 +1275,10 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         const copyValues = {
           hex: () => hexFromRgb(rgb),
           rgb: () => `rgb(${rgb.map(Math.round).join(" ")})`,
-          hsl: () => { const v = rgbToHsl(rgb); return `hsl(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
-          hsv: () => { const v = rgbToHsv(rgb); return `hsv(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
-          lch: () => { const v = rgbToLch(rgb); return `lch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
-          oklch: () => { const v = rgbToOklch(rgb); return `oklch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
+          hsl: () => { const v = colorCoordinates().hsl; return `hsl(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
+          hsv: () => { const v = colorCoordinates().hsv; return `hsv(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
+          lch: () => { const v = colorCoordinates().lch; return `lch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
+          oklch: () => { const v = colorCoordinates().oklch; return `oklch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
           cmyk: () => `cmyk(${rgbToCmyk(rgb).map((v) => round(v)).join(" ")})`
         };
 
