@@ -1170,7 +1170,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
 
           if (format === "rgb") {
             const channels = parts.map((part) => colorComponent(part, 255));
-            return channels.every((part) => part >= 0 && part <= 255) ? channels : null;
+            return channels.every((part) => Number.isFinite(part) && part >= 0 && part <= 255) ? channels : null;
           }
           if (format === "hsl" || format === "hsv") {
             const values = [colorHue(parts[0]), colorComponent(parts[1]), colorComponent(parts[2])];
