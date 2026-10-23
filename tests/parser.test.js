@@ -5,7 +5,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
-const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1];
+const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/i)?.[1];
 assert.ok(script, "index.html should contain the application script");
 const parserSource = script.slice(script.indexOf("        const clamp ="), script.indexOf("        inputs.forEach((input) => {"));
 const { parseFunctional, parseBareFormat } = vm.runInNewContext(
