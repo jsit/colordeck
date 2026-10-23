@@ -112,6 +112,84 @@ test("HEX input restores the pre-edit color when a completed edit is rejected", 
   assert.deepEqual(state.updated, ["hex", "hex"]);
 });
 
+test("rejected HEX after an Enter commit restores the committed shorthand color", () => {
+  const handlerStart = script.indexOf("function handleInput(");
+  const handlerEnd = script.indexOf("function pasteColor(", handlerStart);
+  const commitStart = script.indexOf("function commitHexShorthand(");
+  const commitEnd = script.indexOf("function pasteColor(", commitStart);
+  const keydownHandler = script.match(/input\.addEventListener\("keydown", \(event\) => \{([\s\S]*?)\n          \}\);/);
+  assert.notEqual(handlerStart, -1);
+  assert.notEqual(handlerEnd, -1);
+  assert.notEqual(commitStart, -1);
+  assert.notEqual(commitEnd, -1);
+  assert.ok(keydownHandler);
+
+  const input = {
+    dataset: { key: "hex" },
+    value: "#abc",
+    invalid: null,
+    setAttribute(name, value) {
+      if (name === "aria-invalid") this.invalid = value;
+    },
+  };
+  const state = {
+    rgb: [91, 140, 118],
+    hexEditRgb: [91, 140, 118],
+    updated: [],
+  };
+  const createHandlers = new Function(
+    "input", "state", "parseHex",
+    `let rgb = state.rgb;
+    let hexEditRgb = state.hexEditRgb;
+    const $ = () => input;
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const parseFunctional = () => null;
+    const parseBareFormat = () => null;
+    const rememberInputHue = () => {};
+    const rgbFromInput = (key) => {
+      if (key !== "hex" || !/^#?[\\da-f]{6}$/i.test(input.value.trim())) return null;
+      const hex = input.value.trim().replace(/^#/, "");
+      return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    };
+    const updateFields = (key) => {
+      state.updated.push(key);
+      if (key === undefined) input.value = "#" + rgb.map((value) => value.toString(16).padStart(2, "0")).join("").toUpperCase();
+    };
+    ${script.slice(commitStart, commitEnd)}
+    ${script.slice(handlerStart, handlerEnd)}
+    let keydown;
+    input.addEventListener = (type, listener) => {
+      if (type === "keydown") keydown = listener;
+    };
+    input.addEventListener("keydown", (event) => {${keydownHandler[1]}
+    });
+    return {
+      pressEnter() {
+        let prevented = false;
+        keydown({ key: "Enter", preventDefault() { prevented = true; } });
+        state.rgb = rgb;
+        state.hexEditRgb = hexEditRgb;
+        return prevented;
+      },
+      reject() {
+        handleInput(input);
+        state.rgb = rgb;
+        state.hexEditRgb = hexEditRgb;
+      },
+    };`,
+  )(input, state, parseHex); // eslint-disable-line no-new-func
+
+  assert.equal(createHandlers.pressEnter(), true);
+  assert.equal(input.value, "#AABBCC");
+  assert.deepEqual(state.rgb, [170, 187, 204]);
+  assert.deepEqual(state.hexEditRgb, [170, 187, 204]);
+
+  input.value += "00";
+  createHandlers.reject();
+  assert.equal(input.invalid, "true");
+  assert.deepEqual(state.rgb, [170, 187, 204]);
+});
+
 test("functional parsing rejects alpha-bearing syntax", () => {
   assert.deepEqual(parseFunctional("rgb(255, 0, 0)"), [255, 0, 0]);
   assert.deepEqual(parseFunctional("hsl(0 100% 50%)"), [1, 2, 3]);

@@ -1357,7 +1357,10 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           });
           input.addEventListener("input", () => handleInput(input));
           input.addEventListener("keydown", (event) => {
-            if (input.dataset.key === "hex" && event.key === "Enter" && commitHexShorthand()) event.preventDefault();
+            if (input.dataset.key === "hex" && event.key === "Enter" && commitHexShorthand()) {
+              event.preventDefault();
+              hexEditRgb = rgb.slice();
+            }
           });
           input.addEventListener("blur", () => {
             if (input.dataset.key === "hex" && commitHexShorthand()) {
