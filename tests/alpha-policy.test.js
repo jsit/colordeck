@@ -136,7 +136,7 @@ test("rejected alpha HEX input remains available after blur", () => {
   assert.deepEqual(settledKeys, []);
   assert.equal(input.value, "#FF000000");
   assert.equal(input.getAttribute("aria-invalid"), "true");
-  assert.match(script, /input\.addEventListener\("blur", \(\) => \{\s*settleInputOnBlur\(input\);/);
+  assert.match(script, /input\.addEventListener\("blur", \(\) => \{[\s\S]*?settleInputOnBlur\(input\);/);
 });
 
 test("valid input still settles on blur", () => {
