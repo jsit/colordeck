@@ -1184,6 +1184,14 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return null;
         }
 
+        function commitHexShorthand() {
+          const value = $("hex").value.trim();
+          if (!/^#?[\da-f]{3}$/i.test(value)) return false;
+          rgb = parseHex(value);
+          updateFields();
+          return true;
+        }
+
         function pasteColor(key, value) {
           const color = parseHex(value) || parseFunctional(value) || parseBareFormat(key, value);
           if (!color) return false;
@@ -1215,8 +1223,12 @@ Light Green|#90ee90`.split("\n").map((entry) => {
               input.setAttribute("aria-invalid", "true");
             }
           });
+          input.addEventListener("keydown", (event) => {
+            if (input.dataset.key === "hex" && event.key === "Enter" && commitHexShorthand()) event.preventDefault();
+          });
           input.addEventListener("blur", () => {
-            settleChromaChange(input.dataset.key);
+            const key = input.dataset.key;
+            if (key !== "hex" || !commitHexShorthand()) settleChromaChange(key);
           });
         });
 
