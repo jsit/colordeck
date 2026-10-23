@@ -1102,18 +1102,61 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
         }
 
+        function parseColorTokens(value) {
+          if (value.includes("/")) return null;
+          const tokens = value.trim().split(/[\s,]+/).filter(Boolean);
+          const parsed = tokens.map((token) => {
+            const match = token.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|grad|rad|turn|°)?$/i);
+            return match ? { value: Number(match[1]), unit: (match[2] || "").toLowerCase() } : null;
+          });
+          return parsed.length && parsed.every((part) => part && Number.isFinite(part.value)) ? parsed : null;
+        }
+
+        function colorComponent(part, percentReference = 100) {
+          if (part.unit === "%") return part.value * percentReference / 100;
+          return part.unit === "" ? part.value : null;
+        }
+
+        function colorHue(part) {
+          if (part.unit === "" || part.unit === "deg" || part.unit === "°") return part.value;
+          if (part.unit === "grad") return part.value * .9;
+          if (part.unit === "rad") return part.value * 180 / Math.PI;
+          if (part.unit === "turn") return part.value * 360;
+          return null;
+        }
+
         function parseFunctional(value) {
           const match = value.trim().match(/^(rgb|rgba|hsl|hsla|hsv|hsb|lch|oklch|cmyk)\(\s*([^)]*)\s*\)$/i);
           if (!match) return null;
           const format = match[1].toLowerCase();
-          const parts = match[2].replaceAll(",", " ").replaceAll("/", " ").trim().split(/\s+/).map((v) => parseFloat(v));
-          if (parts.length < (format.startsWith("cmyk") ? 4 : 3) || parts.some((n) => !Number.isFinite(n))) return null;
-          if (format.startsWith("rgb")) return parts.slice(0, 3).map((v) => clamp(v, 0, 255));
-          if (format.startsWith("hsl")) return hslToRgb(parts[0], parts[1], parts[2]);
-          if (format === "hsv" || format === "hsb") return hsvToRgb(parts[0], parts[1], parts[2]);
-          if (format === "lch") return lchToRgb(parts[0], parts[1], parts[2]);
-          if (format === "oklch") return oklchToRgb(parts[0], parts[1], parts[2]);
-          if (format === "cmyk") return cmykToRgb(...parts.slice(0, 4));
+          const parts = parseColorTokens(match[2]);
+          const expectedParts = format === "cmyk" ? 4 : 3;
+          if (!parts || parts.length !== expectedParts) return null;
+          if (format.startsWith("rgb")) {
+            const channels = parts.map((part) => colorComponent(part, 255));
+            return channels.every(Number.isFinite) ? channels.map((v) => clamp(v, 0, 255)) : null;
+          }
+          if (format.startsWith("hsl")) {
+            const [h, s, l] = [colorHue(parts[0]), colorComponent(parts[1]), colorComponent(parts[2])];
+            return [h, s, l].every(Number.isFinite) ? hslToRgb(h, s, l) : null;
+          }
+          if (format === "hsv" || format === "hsb") {
+            const [h, s, v] = [colorHue(parts[0]), colorComponent(parts[1]), colorComponent(parts[2])];
+            return [h, s, v].every(Number.isFinite) ? hsvToRgb(h, s, v) : null;
+          }
+          if (format === "lch") {
+            const [l, c, h] = [colorComponent(parts[0]), colorComponent(parts[1], 150), colorHue(parts[2])];
+            return [l, c, h].every(Number.isFinite) ? lchToRgb(l, c, h) : null;
+          }
+          if (format === "oklch") {
+            const l = parts[0].unit === "%" ? parts[0].value : parts[0].unit === "" ? parts[0].value * 100 : null;
+            const c = colorComponent(parts[1], .4), h = colorHue(parts[2]);
+            return [l, c, h].every(Number.isFinite) ? oklchToRgb(l, c, h) : null;
+          }
+          if (format === "cmyk") {
+            const values = parts.map((part) => colorComponent(part));
+            return values.every(Number.isFinite) ? cmykToRgb(...values) : null;
+          }
           return null;
         }
 
@@ -1122,32 +1165,30 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           const expectedParts = format === "cmyk" ? 4 : 3;
           if (!["rgb", "hsl", "hsv", "lch", "oklch", "cmyk"].includes(format)) return null;
 
-          const tokens = value.trim().split(/[\s,\/]+/).filter(Boolean);
-          if (tokens.length !== expectedParts) return null;
-          const values = [];
-          const units = [];
-          for (const token of tokens) {
-            const match = token.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|°)?$/i);
-            if (!match) return null;
-            values.push(Number(match[1]));
-            units.push((match[2] || "").toLowerCase());
-          }
-          if (values.some((part) => !Number.isFinite(part))) return null;
+          const parts = parseColorTokens(value);
+          if (!parts || parts.length !== expectedParts) return null;
 
           if (format === "rgb") {
-            const channels = values.map((part, i) => units[i] === "%" ? part * 2.55 : part);
+            const channels = parts.map((part) => colorComponent(part, 255));
             return channels.every((part) => part >= 0 && part <= 255) ? channels : null;
           }
           if (format === "hsl" || format === "hsv") {
-            if (values[1] < 0 || values[1] > 100 || values[2] < 0 || values[2] > 100) return null;
-            return format === "hsl" ? hslToRgb(...values) : hsvToRgb(...values);
+            const values = [colorHue(parts[0]), colorComponent(parts[1]), colorComponent(parts[2])];
+            if (!values.every(Number.isFinite)) return null;
+            const [h, s, v] = values;
+            if (s < 0 || s > 100 || v < 0 || v > 100) return null;
+            return format === "hsl" ? hslToRgb(h, s, v) : hsvToRgb(h, s, v);
           }
           if (format === "lch") {
-            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? lchToRgb(...values) : null;
+            const [l, c, h] = [colorComponent(parts[0]), colorComponent(parts[1], 150), colorHue(parts[2])];
+            return [l, c, h].every(Number.isFinite) && l >= 0 && l <= 100 && c >= 0 ? lchToRgb(l, c, h) : null;
           }
           if (format === "oklch") {
-            return values[0] >= 0 && values[0] <= 100 && values[1] >= 0 ? oklchToRgb(...values) : null;
+            const [l, c, h] = [colorComponent(parts[0]), colorComponent(parts[1], .4), colorHue(parts[2])];
+            return [l, c, h].every(Number.isFinite) && l >= 0 && l <= 100 && c >= 0 ? oklchToRgb(l, c, h) : null;
           }
+          const values = parts.map((part) => colorComponent(part));
+          if (!values.every(Number.isFinite)) return null;
           return values.every((part) => part >= 0 && part <= 100) ? cmykToRgb(...values) : null;
         }
 
