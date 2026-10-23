@@ -93,3 +93,23 @@ test("valid input still settles on blur", () => {
   });
   assert.deepEqual(settledKeys, ["hex"]);
 });
+
+test("rejected functional alpha paste stays visible and invalid after blur", () => {
+  const pasted = "rgba(255, 0, 0, 0)";
+  assert.equal(parseFunctional(pasted), null);
+
+  const settledKeys = [];
+  const settleOnBlur = createSettleInputOnBlur((key) => settledKeys.push(key));
+  const attributes = { "aria-invalid": "true" };
+  const input = {
+    dataset: { key: "hex" },
+    value: pasted,
+    getAttribute: (name) => attributes[name],
+  };
+
+  settleOnBlur(input);
+
+  assert.equal(input.value, pasted);
+  assert.equal(attributes["aria-invalid"], "true");
+  assert.deepEqual(settledKeys, []);
+});
