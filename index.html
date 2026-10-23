@@ -1187,7 +1187,9 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         function pasteColor(key, value) {
           const trimmed = value.trim();
           let color;
-          if (key === "hex" || trimmed.startsWith("#")) {
+          if (key === "hex") {
+            color = parseHex(value) || parseFunctional(value) || parseBareFormat(key, value);
+          } else if (trimmed.startsWith("#")) {
             color = parseHex(value);
           } else {
             color = parseFunctional(value) || parseBareFormat(key, value);
