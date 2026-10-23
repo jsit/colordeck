@@ -7,15 +7,16 @@ const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 assert.ok(script, "index.html should contain the application script");
 const start = script.indexOf("const clamp =");
-const end = script.indexOf("function pasteColor", start);
+const end = script.indexOf("inputs.forEach", start);
 assert.ok(start !== -1 && end !== -1, "parser functions should be present in the application script");
 
 const fields = {};
 const context = { fields, document: { getElementById: (id) => fields[id] || { value: "" } } };
-vm.runInNewContext(`const $ = (id) => document.getElementById(id);
+vm.runInNewContext(`let rgb = [91, 140, 118];
+const $ = (id) => document.getElementById(id);
 ${script.slice(start, end)}
-globalThis.colorParser = { parseFunctional, parseBareFormat, rgbFromInput };`, context);
-const { parseFunctional, parseBareFormat, rgbFromInput } = context.colorParser;
+globalThis.colorParser = { parseFunctional, parseBareFormat, rgbFromInput, pasteColor, getRgb: () => rgb };`, context);
+const { parseFunctional, parseBareFormat, rgbFromInput, pasteColor, getRgb } = context.colorParser;
 
 const closeTo = (actual, expected) => {
   assert.ok(actual, "expected a parsed color");
@@ -108,5 +109,13 @@ test("direct component edits with extreme hues remain finite", () => {
     for (const component of ["l", "c", "h"]) fields[`${format}-${component}`] = { value: component === "l" ? "50" : component === "c" ? "0.2" : "1e308" };
     const color = rgbFromInput(key);
     assert.ok(color?.every(Number.isFinite), `${format} should normalize its extreme hue`);
+  }
+});
+
+test("rejected pasted colors do not mutate the selected color", () => {
+  const initial = Array.from(getRgb());
+  for (const input of ["rgb(12oops 0 0)", "hsl(20 30 40 50 60)", "rgb(1e999 0 0)"]) {
+    assert.equal(pasteColor("rgb-r", input), false, input);
+    assert.deepEqual(Array.from(getRgb()), initial, input);
   }
 });
