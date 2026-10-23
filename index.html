@@ -180,14 +180,40 @@
     <div class="toast" id="toast" role="status" aria-live="polite">Copied to clipboard</div>
 
     <script>
+      /**
+       * A three-channel color. Units depend on the conversion function: sRGB uses
+       * 0–255 channels, XYZ uses a unit-scale white, and Lab uses D50 coordinates.
+       * @typedef {[number, number, number]} ColorTriple
+       */
+      /** @typedef {"hsl" | "hsv" | "lch" | "oklch"} HueModel */
+      /** @typedef {{value: number, unit: string}} ColorNumber */
+      /** @typedef {{lightness: number, hue: number, value: number}} ChromaMaximum */
+      /** @typedef {{hsl: ColorTriple, hsv: ColorTriple, lch: ColorTriple, oklch: ColorTriple}} Coordinates */
+      /** @typedef {(chroma: number) => ColorTriple} ChromaConverter */
+      /**
+       * Initialize the opaque-color converter and register its browser events.
+       * All state stays local to this page; conversions retain fractional RGB.
+       * @returns {void}
+       */
       (() => {
-        const elements = new Map([...document.querySelectorAll("[id]")].map((element) => [element.id, element]));
+        /** @type {Map<string, HTMLElement>} Fixed page elements indexed by ID. */
+        const elements = new Map([...document.querySelectorAll("[id]")].map(/** @param {HTMLElement} element @returns {[string, HTMLElement]} */ (element) => [element.id, element]));
+        /**
+         * Look up a cached page element; callers use IDs from this document.
+         * @param {string} id Element ID.
+         * @returns {HTMLElement | undefined} The matching cached element.
+         */
         const $ = (id) => elements.get(id);
+        /** @type {HTMLInputElement[]} Editable color component inputs. */
         const inputs = [...document.querySelectorAll("[data-key]")];
-        const inputByKey = new Map(inputs.map((input) => [input.dataset.key, input]));
+        /** @type {Map<string, HTMLInputElement>} Component inputs indexed by format/channel key. */
+        const inputByKey = new Map(inputs.map(/** @param {HTMLInputElement} input @returns {[string, HTMLInputElement]} */ (input) => [input.dataset.key, input]));
+        /** @type {HTMLInputElement[]} Native range controls for numeric components. */
         const sliders = [...document.querySelectorAll("[data-slider-for]")];
-        const sliderByKey = new Map(sliders.map((slider) => [slider.dataset.sliderFor, slider]));
+        /** @type {Map<string, HTMLInputElement>} Sliders indexed by their associated input key. */
+        const sliderByKey = new Map(sliders.map(/** @param {HTMLInputElement} slider @returns {[string, HTMLInputElement]} */ (slider) => [slider.dataset.sliderFor, slider]));
         // X.Org X11 rgb.txt (v1.3); aliases are normalized to readable title case.
+        /** @type {Array<[string, string]>} Ordered X11 display-name/HEX pairs; order breaks ties. */
         const colorNames = `Snow|#fffafa
 Ghost White|#f8f8ff
 White Smoke|#f5f5f5
@@ -845,38 +871,64 @@ Dark Blue|#00008b
 Dark Cyan|#008b8b
 Dark Magenta|#8b008b
 Dark Red|#8b0000
-Light Green|#90ee90`.split("\n").map((entry) => {
+Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string, string]} */ (entry) => {
+          /** @type {number} Boundary between the display name and its HEX swatch. */
           const separator = entry.lastIndexOf("|");
           return [entry.slice(0, separator), entry.slice(separator + 1)];
         });
+        /** @type {ColorTriple} Current opaque sRGB channels, 0–255 with fractional precision. */
         let rgb = [91, 140, 118];
+        /** @type {ColorTriple | null} Color to restore if the current HEX edit is rejected. */
         let hexEditRgb = null;
+        /** @type {Record<HueModel, number | null>} Last meaningful or selected hue in degrees. */
         const retainedHues = { hsl: null, hsv: null, lch: null, oklch: null };
+        /** @type {string | null} Slider key whose native pointer tracking must not be overwritten. */
         let activeSliderKey = null;
+        /** @type {boolean} Whether initialization has finished and URL writes are enabled. */
         let urlSyncReady = false;
+        /** @type {number | undefined} Browser timeout ID for hiding the clipboard status toast. */
         let toastTimer;
+        /** @type {{lch: ChromaMaximum | null, oklch: ChromaMaximum | null}} Per-model gamut limits. */
         const chromaMaxima = { lch: null, oklch: null };
 
+        /** @param {number} value @param {number} min @param {number} max @returns {number} Value bounded inclusively by min/max. */
         const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+        /** @param {string} key @returns {number} Numeric input value; empty text currently coerces to zero. */
         const number = (key) => Number(inputByKey.get(key).value.trim());
+        /** @param {string} key @param {number | string} value @returns {void} Write a field and clear its invalid marker. */
         const setValue = (key, value) => {
+          /** @type {HTMLInputElement} Cached component field being refreshed. */
           const input = inputByKey.get(key);
           input.value = String(value);
           input.setAttribute("aria-invalid", "false");
         };
+        /** @param {number} value @param {number} [places=0] @returns {number} Decimal-place rounding without trailing zeros. */
         const round = (value, places = 0) => Number(value.toFixed(places));
+        /** @param {number} value @param {number} [digits=4] @returns {number} Significant-digit rounding without padding. */
         const significant = (value, digits = 4) => Number(value.toPrecision(digits));
-        const hexFromRgb = ([r, g, b]) => "#" + [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("").toUpperCase();
+        /** @param {ColorTriple} color Fractional sRGB, 0–255. @returns {string} Rounded uppercase six-digit HEX with a leading hash. */
+        const hexFromRgb = ([r, g, b]) => "#" + [r, g, b].map(/** @param {number} v @returns {string} */ (v) => Math.round(v).toString(16).padStart(2, "0")).join("").toUpperCase();
+        /** @param {number} hue @returns {number} Degrees wrapped into [0, 360). */
         const normalizedHue = (hue) => ((hue % 360) + 360) % 360;
+        /** @type {number} Threshold for treating saturation/chroma or endpoint lightness as powerless. */
         const hueTolerance = 0.0001;
 
+        /**
+         * Keep an explicit hue when an achromatic color cannot determine one.
+         * @param {HueModel} model Color representation whose hue is being tracked.
+         * @param {number} hue Computed hue in degrees.
+         * @param {boolean} powerless Whether this color's hue is undefined or unstable.
+         * @returns {number} Computed hue, or the retained hue (initially zero).
+         */
         function retainHue(model, hue, powerless) {
           if (!powerless) retainedHues[model] = hue;
           else if (retainedHues[model] === null) retainedHues[model] = 0;
           return powerless ? retainedHues[model] : hue;
         }
 
+        /** @returns {Coordinates} Current model coordinates, updating/using retained powerless hues; lightness and saturation use 0–100. */
         function colorCoordinates() {
+          /** @type {ColorTriple} HSL, HSV, LCH, and OKLCH coordinates before retained-hue substitution. */
           const hsl = rgbToHsl(rgb), hsv = rgbToHsv(rgb), lch = rgbToLch(rgb), oklch = rgbToOklch(rgb);
           hsl[0] = retainHue("hsl", hsl[0], hsl[1] <= hueTolerance || hsl[2] <= hueTolerance || hsl[2] >= 100 - hueTolerance);
           hsv[0] = retainHue("hsv", hsv[0], hsv[1] <= hueTolerance || hsv[2] <= hueTolerance);
@@ -885,24 +937,47 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return { hsl, hsv, lch, oklch };
         }
 
+        /**
+         * Infer a wrapped color function's model, falling back to the target field.
+         * @param {string} key Target component key.
+         * @param {string} value User-supplied color text.
+         * @returns {string} Canonical model name (aliases map to rgb/hsl/hsv).
+         */
         function inputFormat(key, value) {
+          /** @type {RegExpMatchArray | null} Supported function name at the beginning of the text. */
           const functional = value.trim().match(/^(rgb|rgba|hsl|hsla|hsv|hsb|lch|oklch|cmyk)\(/i);
           return functional ? functional[1].toLowerCase().replace("hsb", "hsv").replace("hsla", "hsl").replace("rgba", "rgb") : key.split("-")[0];
         }
 
+        /**
+         * Record a supplied hue before an achromatic conversion can erase it.
+         * @param {string} key Target field key (reserved for context).
+         * @param {string} value Scalar hue or complete color text.
+         * @param {string} format Canonical source model name.
+         * @param {boolean} [scalar=false] Whether value is a direct hue-component edit.
+         * @returns {void}
+         */
         function rememberInputHue(key, value, format, scalar = false) {
           if (!["hsl", "hsv", "lch", "oklch"].includes(format)) return;
+          /** @type {RegExpMatchArray | null} Wrapped function and its component text, if present. */
           const functional = value.trim().match(/^(hsl|hsla|hsv|hsb|lch|oklch)\(\s*([^)]*)\s*\)$/i);
+          /** @type {ColorNumber[] | null} Parsed components for complete-color inputs. */
           const parts = scalar ? null : parseColorTokens(functional ? functional[2] : value);
+          /** @type {number} Hue's position in the source model's component order. */
           const hueIndex = format === "hsl" || format === "hsv" ? 0 : 2;
+          /** @type {number | null} Supplied hue converted to degrees, or an unusable result. */
           const hue = scalar ? Number(value.trim()) : (parts?.[hueIndex] ? colorHue(parts[hueIndex]) : NaN);
           if (Number.isFinite(hue)) retainedHues[format] = normalizedHue(hue);
         }
 
+        /** @param {ColorTriple} color sRGB channels, 0–255. @returns {ColorTriple} Hue degrees, saturation %, lightness %. */
         function rgbToHsl([r, g, b]) {
           r /= 255; g /= 255; b /= 255;
+          /** @type {number} Maximum, minimum, and spread of unit-scale channels. */
           const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
+          /** @type {number} Hue in degrees and unit-scale saturation, initially achromatic. */
           let h = 0, s = 0;
+          /** @type {number} Unit-scale lightness. */
           const l = (max + min) / 2;
           if (delta) {
             s = delta / (1 - Math.abs(2 * l - 1));
@@ -913,19 +988,26 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [(h + 360) % 360, s * 100, l * 100];
         }
 
+        /** @param {number} h Hue degrees. @param {number} s Saturation %. @param {number} l Lightness %. @returns {ColorTriple} Fractional sRGB channels, 0–255. */
         function hslToRgb(h, s, l) {
           h = ((h % 360) + 360) % 360 / 360; s /= 100; l /= 100;
+          /** @param {number} n Channel's hue-sector offset. @returns {number} Fractional 0–255 channel. */
           const f = (n) => {
+            /** @type {number} Wrapped channel hue-sector position. */
             const k = (n + h * 12) % 12;
+            /** @type {number} Chroma amplitude at the selected lightness. */
             const a = s * Math.min(l, 1 - l);
             return 255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)));
           };
           return [f(0), f(8), f(4)];
         }
 
+        /** @param {ColorTriple} color sRGB channels, 0–255. @returns {ColorTriple} Hue degrees, saturation %, value %. */
         function rgbToHsv([r, g, b]) {
           r /= 255; g /= 255; b /= 255;
+          /** @type {number} Maximum, minimum, and spread of unit-scale channels. */
           const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
+          /** @type {number} Hue in degrees, initially zero for achromatic colors. */
           let h = 0;
           if (delta) {
             if (max === r) h = 60 * (((g - b) / delta) % 6);
@@ -935,78 +1017,117 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [(h + 360) % 360, max ? delta / max * 100 : 0, max * 100];
         }
 
+        /** @param {number} h Hue degrees. @param {number} s Saturation %. @param {number} v Value %. @returns {ColorTriple} Fractional sRGB channels, 0–255. */
         function hsvToRgb(h, s, v) {
           h = ((h % 360) + 360) % 360;
           s /= 100; v /= 100;
+          /** @type {number} Chroma, intermediate sector channel, and neutral offset. */
           const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+          /** @type {ColorTriple} Hue-sector channels before adding the neutral offset. */
           const sectors = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
-          return sectors.map((n) => (n + m) * 255);
+          return sectors.map(/** @param {number} n @returns {number} */ (n) => (n + m) * 255);
         }
 
+        /** @param {ColorTriple} color sRGB channels, 0–255. @returns {ColorTriple} D65 XYZ with white Y=1, not 100. */
         function rgbToXyz([r, g, b]) {
+          /** @param {number} v Gamma-encoded 0–255 channel. @returns {number} Unit-scale linear-light channel. */
           const linear = (v) => { v /= 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; };
           r = linear(r); g = linear(g); b = linear(b);
           return [r * .4124564 + g * .3575761 + b * .1804375, r * .2126729 + g * .7151522 + b * .072175, r * .0193339 + g * .119192 + b * .9503041];
         }
 
+        /** @param {ColorTriple} color Unit-scale D65 XYZ. @returns {ColorTriple} Gamma-encoded sRGB; out-of-gamut channels intentionally remain outside 0–255. */
         function xyzToRgbUnclamped([x, y, z]) {
+          /** @type {number} Unbounded linear-light red channel. */
           let r = x * 3.2404542 - y * 1.5371385 - z * .4985314;
+          /** @type {number} Unbounded linear-light green channel. */
           let g = -x * .969266 + y * 1.8760108 + z * .041556;
+          /** @type {number} Unbounded linear-light blue channel. */
           let b = x * .0556434 - y * .2040259 + z * 1.0572252;
+          /** @param {number} v Linear-light channel. @returns {number} Gamma-encoded channel on the 0–255 scale, without clipping. */
           const gamma = (v) => 255 * (v <= .0031308 ? 12.92 * v : 1.055 * Math.max(0, v) ** (1 / 2.4) - .055);
           return [gamma(r), gamma(g), gamma(b)];
         }
 
+        /** @param {ColorTriple} color Unit-scale D65 XYZ. @returns {ColorTriple} D50 CIELAB: L* (nominally 0–100), a*, b*. */
         function xyzToLab([x, y, z]) {
           // Bradford adaptation from D65 (sRGB) to D50, the CSS CIELAB reference white.
+          /** @type {ColorTriple} XYZ adapted to the D50 reference white. */
           const d50 = [1.0478112 * x + .0228866 * y - .050127 * z, .0295424 * x + .9904844 * y - .0170491 * z, -.0092345 * x + .0150436 * y + .7521316 * z];
+          /** @param {number} t White-normalized XYZ channel. @returns {number} CIELAB's piecewise lightness transform. */
           const f = (t) => t > .008856451679 ? Math.cbrt(t) : 7.787037 * t + 16 / 116;
+          /** @type {number} Transformed D50-white-normalized X, Y, and Z channels. */
           const fx = f(d50[0] / .96422), fy = f(d50[1]), fz = f(d50[2] / .82521);
           return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
         }
 
-        const colorNameLabs = colorNames.map((entry) => {
+        /** @type {ColorTriple[]} Invariant Lab swatches, cached once in colorNames order. */
+        const colorNameLabs = colorNames.map(/** @param {[string, string]} entry @returns {ColorTriple} */ (entry) => {
+          /** @type {string} Palette swatch without its hash prefix. */
           const hex = entry[1].slice(1);
-          const sample = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+          /** @type {ColorTriple} Parsed palette swatch's 0–255 RGB channels. */
+          const sample = [0, 2, 4].map(/** @param {number} i @returns {number} */ (i) => parseInt(hex.slice(i, i + 2), 16));
           return xyzToLab(rgbToXyz(sample));
         });
 
+        /** @param {ColorTriple} color D50 CIELAB L*, a*, b*. @returns {ColorTriple} Unit-scale D65 XYZ, adapted for sRGB. */
         function labToXyz([l, a, b]) {
+          /** @type {number} Intermediate inverse-Lab lightness transforms for Y, X, and Z. */
           const fy = (l + 16) / 116, fx = fy + a / 500, fz = fy - b / 200;
+          /** @param {number} t Transformed channel. @returns {number} White-normalized linear XYZ channel. */
           const finv = (t) => t ** 3 > .008856451679 ? t ** 3 : (t - 16 / 116) / 7.787037;
+          /** @type {number} D50 XYZ channels before adaptation to D65. */
           const x = .96422 * finv(fx), y = finv(fy), z = .82521 * finv(fz);
           // Inverse Bradford adaptation from D50 back to the sRGB D65 white point.
           return [.9555766 * x - .0230393 * y + .0631636 * z, -.0282895 * x + 1.0099416 * y + .0210077 * z, .0122982 * x - .020483 * y + 1.3299098 * z];
         }
 
+        /** @param {ColorTriple} color sRGB channels, 0–255. @returns {ColorTriple} D50 CIELCH: lightness 0–100, chroma, hue degrees. */
         function rgbToLch(color) {
+          /** @type {ColorTriple} Cartesian Lab coordinates to convert to polar chroma/hue. */
           const [l, a, b] = xyzToLab(rgbToXyz(color));
           return [l, Math.hypot(a, b), (Math.atan2(b, a) * 180 / Math.PI + 360) % 360];
         }
 
+        /**
+         * Fit a requested chroma into sRGB without changing the converter's L/H.
+         * @param {number} chroma Requested nonnegative chroma in the source model.
+         * @param {ChromaConverter} convert Unclamped converter holding lightness/hue fixed.
+         * @returns {ColorTriple} In-gamut fractional sRGB, with only chroma reduced.
+         */
         function fitChromaToSrgb(chroma, convert) {
-          const inGamut = (color) => color.every((channel) => channel >= 0 && channel <= 255);
+          /** @param {ColorTriple} color @returns {boolean} Whether all channels fit sRGB without clipping. */
+          const inGamut = (color) => color.every(/** @param {number} channel @returns {boolean} */ (channel) => channel >= 0 && channel <= 255);
+          /** @type {ColorTriple} RGB result at the requested chroma before gamut mapping. */
           const requested = convert(chroma);
-          if (inGamut(requested)) return requested.map((channel) => clamp(channel, 0, 255));
+          if (inGamut(requested)) return requested.map(/** @param {number} channel @returns {number} */ (channel) => clamp(channel, 0, 255));
 
           // Reduce only chroma so lightness and hue remain fixed when mapping into sRGB.
+          /** @type {number} In-gamut lower and out-of-gamut upper chroma search bounds. */
           let low = 0, high = chroma;
+          /** @type {number} Bisection iteration index. */
           for (let i = 0; i < 28; i++) {
+            /** @type {number} Candidate chroma at the current interval midpoint. */
             const middle = (low + high) / 2;
             if (inGamut(convert(middle))) low = middle;
             else high = middle;
           }
-          return convert(low).map((channel) => clamp(channel, 0, 255));
+          return convert(low).map(/** @param {number} channel @returns {number} */ (channel) => clamp(channel, 0, 255));
         }
 
+        /** @param {ChromaConverter} convert Unclamped conversion at fixed lightness/hue. @returns {number} Estimated highest in-gamut chroma, found by bracketing and bisection. */
         function maxChromaInSrgb(convert) {
-          const inGamut = (color) => color.every((channel) => channel >= 0 && channel <= 255);
+          /** @param {ColorTriple} color @returns {boolean} Whether every channel fits in 0–255. */
+          const inGamut = (color) => color.every(/** @param {number} channel @returns {boolean} */ (channel) => channel >= 0 && channel <= 255);
+          /** @type {number} Lower and upper bounds for the candidate chroma interval. */
           let low = 0, high = 1;
           while (high < 1024 && inGamut(convert(high))) {
             low = high;
             high *= 2;
           }
+          /** @type {number} Bisection iteration index. */
           for (let i = 0; i < 32; i++) {
+            /** @type {number} Candidate midpoint chroma. */
             const middle = (low + high) / 2;
             if (inGamut(convert(middle))) low = middle;
             else high = middle;
@@ -1014,114 +1135,176 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return low;
         }
 
+        /** @param {number} l LCH lightness, 0–100. @param {number} chroma CIELCH chroma. @param {number} h Hue degrees. @returns {ColorTriple} Unclamped sRGB channels for gamut probing. */
         function lchRgbAtChroma(l, chroma, h) {
+          /** @type {number} Hue angle in radians for the Lab polar-to-Cartesian transform. */
           const radians = h * Math.PI / 180;
           return xyzToRgbUnclamped(labToXyz([l, chroma * Math.cos(radians), chroma * Math.sin(radians)]));
         }
 
+        /** @param {number} l Lightness, clamped to 0–100. @param {number} c Chroma, clamped to 0–200 before gamut fitting. @param {number} h Hue degrees. @returns {ColorTriple} In-gamut fractional sRGB. */
         function lchToRgb(l, c, h) {
           l = clamp(l, 0, 100);
-          return fitChromaToSrgb(clamp(c, 0, 200), (chroma) => lchRgbAtChroma(l, chroma, h));
+          return fitChromaToSrgb(clamp(c, 0, 200), /** @param {number} chroma @returns {ColorTriple} */ (chroma) => lchRgbAtChroma(l, chroma, h));
         }
 
+        /** @param {number} l Lightness, 0–100. @param {number} h Hue degrees. @returns {number} CIELCH chroma limit at this lightness/hue. */
         function maxLchChroma(l, h) {
-          return maxChromaInSrgb((chroma) => lchRgbAtChroma(l, chroma, h));
+          return maxChromaInSrgb(/** @param {number} chroma @returns {ColorTriple} */ (chroma) => lchRgbAtChroma(l, chroma, h));
         }
 
+        /** @param {ColorTriple} color sRGB channels, 0–255. @returns {ColorTriple} OKLCH: lightness %, chroma, hue degrees. */
         function rgbToOklch(color) {
-          const [r8, g8, b8] = color.map((v) => v / 255);
+          /** @type {ColorTriple} Gamma-encoded RGB channels normalized to 0–1. */
+          const [r8, g8, b8] = color.map(/** @param {number} v @returns {number} */ (v) => v / 255);
+          /** @param {number} v Unit-scale gamma-encoded channel. @returns {number} Unit-scale linear-light channel. */
           const linear = (v) => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;
+          /** @type {number} Linear-light red, green, and blue channels. */
           const r = linear(r8), g = linear(g8), b = linear(b8);
+          /** @type {number} Cube-root long-wavelength LMS response. */
           const l = Math.cbrt(.4122214708 * r + .5363325363 * g + .0514459929 * b);
+          /** @type {number} Cube-root medium-wavelength LMS response. */
           const m = Math.cbrt(.2119034982 * r + .6806995451 * g + .1073969566 * b);
+          /** @type {number} Cube-root short-wavelength LMS response. */
           const s = Math.cbrt(.0883024619 * r + .2817188376 * g + .6299787005 * b);
+          /** @type {number} Unit-scale Oklab lightness. */
           const L = .2104542553 * l + .793617785 * m - .0040720468 * s;
+          /** @type {number} Oklab green/red opponent coordinate. */
           const a = 1.9779984951 * l - 2.428592205 * m + .4505937099 * s;
+          /** @type {number} Oklab blue/yellow opponent coordinate. */
           const bb = .0259040371 * l + .7827717662 * m - .808675766 * s;
           return [L * 100, Math.hypot(a, bb), (Math.atan2(bb, a) * 180 / Math.PI + 360) % 360];
         }
 
+        /** @param {number} L Lightness %, converted internally to 0–1. @param {number} chroma OKLCH chroma. @param {number} h Hue degrees. @returns {ColorTriple} Unclamped sRGB for gamut probing. */
         function oklchRgbAtChroma(L, chroma, h) {
           L /= 100;
+          /** @type {number} Hue angle in radians. */
           const radians = h * Math.PI / 180;
+          /** @type {number} Cartesian Oklab opponent coordinates. */
           const a = chroma * Math.cos(radians), b = chroma * Math.sin(radians);
+          /** @type {number} Cubed long-wavelength LMS response. */
           const l = (L + .3963377774 * a + .2158037573 * b) ** 3;
+          /** @type {number} Cubed medium-wavelength LMS response. */
           const m = (L - .1055613458 * a - .0638541728 * b) ** 3;
+          /** @type {number} Cubed short-wavelength LMS response. */
           const s = (L - .0894841775 * a - 1.291485548 * b) ** 3;
+          /** @type {ColorTriple} Unbounded linear-light RGB channels. */
           const linear = [4.0767416621 * l - 3.3077115913 * m + .2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - .3413193965 * s, -.0041960863 * l - .7034186147 * m + 1.707614701 * s];
+          /** @param {number} v Linear-light channel. @returns {number} Gamma-encoded, unclamped channel on the 0–255 scale. */
           const gamma = (v) => 255 * (v <= .0031308 ? 12.92 * v : 1.055 * Math.max(0, v) ** (1 / 2.4) - .055);
           return linear.map(gamma);
         }
 
+        /** @param {number} L Lightness %, clamped to 0–100. @param {number} C Chroma, clamped to 0–0.5 before gamut fitting. @param {number} h Hue degrees. @returns {ColorTriple} In-gamut fractional sRGB. */
         function oklchToRgb(L, C, h) {
           L = clamp(L, 0, 100);
-          return fitChromaToSrgb(clamp(C, 0, .5), (chroma) => oklchRgbAtChroma(L, chroma, h));
+          return fitChromaToSrgb(clamp(C, 0, .5), /** @param {number} chroma @returns {ColorTriple} */ (chroma) => oklchRgbAtChroma(L, chroma, h));
         }
 
+        /** @param {number} L Lightness %. @param {number} h Hue degrees. @returns {number} OKLCH chroma limit at this lightness/hue. */
         function maxOklchChroma(L, h) {
-          return maxChromaInSrgb((chroma) => oklchRgbAtChroma(L, chroma, h));
+          return maxChromaInSrgb(/** @param {number} chroma @returns {ColorTriple} */ (chroma) => oklchRgbAtChroma(L, chroma, h));
         }
 
+        /**
+         * Reuse the last gamut limit only when this model's displayed L/H match.
+         * @param {"lch" | "oklch"} model Cache slot to read/write.
+         * @param {number} lightness Lightness on the model's 0–100 UI scale.
+         * @param {number} hue Hue degrees.
+         * @param {(lightness: number, hue: number) => number} calculate Gamut limit calculation.
+         * @returns {number} Cached or newly calculated maximum chroma.
+         */
         function cachedMaxChroma(model, lightness, hue, calculate) {
+          /** @type {ChromaMaximum | null} Most recently calculated limit for this model. */
           const cached = chromaMaxima[model];
           if (cached && cached.lightness === lightness && cached.hue === hue) return cached.value;
+          /** @type {number} Fresh maximum chroma for the supplied coordinates. */
           const value = calculate(lightness, hue);
           chromaMaxima[model] = { lightness, hue, value };
           return value;
         }
 
+        /** @param {ColorTriple} color sRGB channels, 0–255. @returns {[number, number, number, number]} Approximate cyan/magenta/yellow/black percentages, without a print profile. */
         function rgbToCmyk([r, g, b]) {
+          /** @type {number} Unit-scale gamma-encoded red, green, and blue. */
           const rn = r / 255, gn = g / 255, bn = b / 255;
+          /** @type {number} Unit-scale black component; pure black avoids division by zero. */
           const k = 1 - Math.max(rn, gn, bn);
           if (k === 1) return [0, 0, 0, 100];
           return [(1 - rn - k) / (1 - k) * 100, (1 - gn - k) / (1 - k) * 100, (1 - bn - k) / (1 - k) * 100, k * 100];
         }
 
+        /** @param {number} c Cyan %. @param {number} m Magenta %. @param {number} y Yellow %. @param {number} k Black %. @returns {ColorTriple} Approximate fractional sRGB, without a print profile. */
         function cmykToRgb(c, m, y, k) {
           c /= 100; m /= 100; y /= 100; k /= 100;
           return [255 * (1 - c) * (1 - k), 255 * (1 - m) * (1 - k), 255 * (1 - y) * (1 - k)];
         }
 
+        /** @param {ColorTriple} color sRGB channels, 0–255. @returns {string} Closest X11 name by Euclidean D50 Lab distance; first entry wins ties. */
         function closestName(color) {
+          /** @type {ColorTriple} Current color in the same Lab space as the cached palette. */
           const lab = xyzToLab(rgbToXyz(color));
+          /** Best display name and its distance; initialized to the first palette entry. @type {string} */
           let best = colorNames[0][0], distance = Infinity;
+          /** @type {number} Index shared by the ordered name and Lab caches. */
           for (let i = 0; i < colorNames.length; i++) {
+            /** @type {ColorTriple} Cached Lab coordinates of this candidate swatch. */
             const targetLab = colorNameLabs[i];
+            /** @type {number} CIE76 Euclidean distance to this candidate. */
             const d = Math.hypot(lab[0] - targetLab[0], lab[1] - targetLab[1], lab[2] - targetLab[2]);
             if (d < distance) { distance = d; best = colorNames[i][0]; }
           }
           return best;
         }
 
+        /** @param {string} hex Uppercase six-digit HEX including its hash. @returns {void} Replace the URL fragment without adding a history entry. */
         function updateUrlColor(hex) {
+          /** @type {URL} Current page URL, retaining its path and query parameters. */
           const url = new URL(window.location.href);
           if (url.hash.toUpperCase() === hex) return;
           url.hash = hex;
           window.history.replaceState(window.history.state, "", url);
         }
 
+        /**
+         * Refresh controls, preview, name, gamut limits, and (after startup) URL.
+         * @param {string} [preserveFormat] Field key/model whose input text should stay untouched.
+         * @param {string[]} [preserveKeys=[]] Additional exact field keys to preserve.
+         * @returns {void}
+         */
         function updateFields(preserveFormat, preserveKeys = []) {
+          /** @type {string | null} Model prefix whose fields are being edited. */
           const preservedGroup = preserveFormat ? preserveFormat.split("-")[0] : null;
+          /** @type {Set<string>} Individually protected fields for this refresh only. */
           const preservedKeySet = new Set(preserveKeys);
+          /** @param {string} key Component key. @param {number | string} value Computed display value. @returns {void} Refresh one input/slider pair unless preserved. */
           const write = (key, value) => {
+            /** @type {HTMLInputElement | undefined} Native range control associated with this key. */
             const slider = sliderByKey.get(key);
+            /** @type {boolean | string | null} Truthy when this field's current text must be preserved. */
             const isPreserved = preservedKeySet.has(key) || (preservedGroup && (key === preservedGroup || key.startsWith(`${preservedGroup}-`)));
             // Keep the pointer tracking during a drag; a clipped color can have less chroma than requested.
             if (slider && activeSliderKey !== key) slider.value = isPreserved ? $(key).value : value;
             if (!isPreserved) setValue(key, value);
           };
+          /** @type {string} Rounded, serialized current color. */
           const hex = hexFromRgb(rgb);
+          /** @type {Coordinates} Current coordinates with powerless hues retained per model. */
           const { hsl, hsv, lch, oklch } = colorCoordinates();
+          /** @type {[number, number, number, number]} Approximate print-channel percentages. */
           const cmyk = rgbToCmyk(rgb);
           write("hex", hex);
-          ["rgb-r", "rgb-g", "rgb-b"].forEach((key, i) => write(key, round(rgb[i])));
-          ["hsl-h", "hsl-s", "hsl-l"].forEach((key, i) => write(key, round(hsl[i])));
-          ["hsv-h", "hsv-s", "hsv-v"].forEach((key, i) => write(key, round(hsv[i])));
+          ["rgb-r", "rgb-g", "rgb-b"].forEach(/** @param {string} key @param {number} i @returns {void} */ (key, i) => write(key, round(rgb[i])));
+          ["hsl-h", "hsl-s", "hsl-l"].forEach(/** @param {string} key @param {number} i @returns {void} */ (key, i) => write(key, round(hsl[i])));
+          ["hsv-h", "hsv-s", "hsv-v"].forEach(/** @param {string} key @param {number} i @returns {void} */ (key, i) => write(key, round(hsv[i])));
           write("lch-l", round(lch[0], 1));
           write("lch-h", round(lch[2], 1));
           write("oklch-l", round(oklch[0], 1));
           write("oklch-h", round(oklch[2], 1));
+          /** @type {HTMLInputElement | undefined} LCH chroma control whose range follows L/H. */
           const lchChromaSlider = sliderByKey.get("lch-c");
+          /** @type {HTMLInputElement | undefined} OKLCH chroma control whose range follows L/H. */
           const oklchChromaSlider = sliderByKey.get("oklch-c");
           if (lchChromaSlider) {
             lchChromaSlider.min = 0;
@@ -1135,7 +1318,8 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           }
           write("lch-c", significant(lch[1]));
           write("oklch-c", significant(oklch[1]));
-          ["cmyk-c", "cmyk-m", "cmyk-y", "cmyk-k"].forEach((key, i) => write(key, round(cmyk[i])));
+          ["cmyk-c", "cmyk-m", "cmyk-y", "cmyk-k"].forEach(/** @param {string} key @param {number} i @returns {void} */ (key, i) => write(key, round(cmyk[i])));
+          /** @type {string} Lowercase six-digit HEX accepted by the native picker. */
           const color = hex.toLowerCase();
           $("swatch").style.backgroundColor = color;
           $("swatch").setAttribute("aria-label", `Selected color ${hex}`);
@@ -1145,39 +1329,51 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           if (urlSyncReady) updateUrlColor(hex);
         }
 
+        /** @param {string} key Committed component key. @returns {void} Normalize an edit while protecting L/H when only chroma was edited. */
         function settleChromaChange(key) {
           if (key === "lch-c") return updateFields(undefined, ["lch-l", "lch-h"]);
           if (key === "oklch-c") return updateFields(undefined, ["oklch-l", "oklch-h"]);
           updateFields();
         }
 
+        /** @param {HTMLInputElement} input Field losing focus. @returns {void} Normalize valid edits; leave rejected text visible for correction. */
         function settleInputOnBlur(input) {
           if (input.getAttribute("aria-invalid") === "true") return;
           settleChromaChange(input.dataset.key);
         }
 
+        /** @param {string} value Optional hash plus three/six HEX digits; alpha is unsupported. @returns {ColorTriple | null} Opaque RGB channels, or null for invalid/alpha HEX. */
         function parseHex(value) {
+          /** @type {RegExpMatchArray | null} Entire accepted HEX token and its digit capture. */
           const match = value.trim().match(/^#?([\da-f]{3}|[\da-f]{6})$/i);
           if (!match) return null;
+          /** @type {string} Captured HEX digits, expanded to six digits if shorthand. */
           let hex = match[1];
-          if (hex.length === 3) hex = [...hex].map((char) => char + char).join("");
-          return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+          if (hex.length === 3) hex = [...hex].map(/** @param {string} char @returns {string} */ (char) => char + char).join("");
+          return [0, 2, 4].map(/** @param {number} i @returns {number} */ (i) => parseInt(hex.slice(i, i + 2), 16));
         }
 
+        /** @param {string} token A complete numeric token, optionally with a supported unit. @returns {ColorNumber | null} Finite numeric value/unit, or null for malformed tokens. */
         function parseColorNumber(token) {
+          /** @type {RegExpMatchArray | null} Numeric part and optional percentage/angle suffix. */
           const match = token.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|°|grad|rad|turn)?$/i);
           if (!match) return null;
+          /** @type {number} Parsed numeric component, checked for finiteness before returning. */
           const value = Number(match[1]);
           return Number.isFinite(value) ? { value, unit: (match[2] || "").toLowerCase() } : null;
         }
 
+        /** @param {string} value Comma/space-separated component text without alpha. @returns {ColorNumber[] | null} Parsed tokens for hue retention, or null if invalid/empty. */
         function parseColorTokens(value) {
           if (value.includes("/")) return null;
+          /** @type {string[]} Nonempty component tokens. */
           const tokens = value.trim().split(/[\s,]+/).filter(Boolean);
+          /** @type {Array<ColorNumber | null>} Component parse results before rejecting invalid tokens. */
           const parsed = tokens.map(parseColorNumber);
           return parsed.length && parsed.every(Boolean) ? parsed : null;
         }
 
+        /** @param {ColorNumber} part Parsed angle. @returns {number | null} Degrees without wrapping, or null for a non-angle unit. */
         function colorHue(part) {
           if (part.unit === "" || part.unit === "deg" || part.unit === "°") return part.value;
           if (part.unit === "grad") return part.value * .9;
@@ -1186,6 +1382,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return null;
         }
 
+        /** @param {ColorNumber} part Parsed angle with a validated unit. @returns {number} Signed degree remainder; reduces magnitude before conversion to avoid overflow. */
         function hueInDegrees({ value, unit }) {
           if (unit === "grad") return (value % 400) * .9;
           if (unit === "rad") return (value % (2 * Math.PI)) * 180 / Math.PI;
@@ -1193,95 +1390,127 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return value % 360;
         }
 
+        /** @param {unknown} color Candidate conversion output. @returns {ColorTriple | null} Three finite channels, or null to prevent corrupting shared state. */
         function finiteColor(color) {
           return Array.isArray(color) && color.length === 3 && color.every(Number.isFinite) ? color : null;
         }
 
+        /**
+         * Parse an opaque wrapped color, validate units/separators, and normalize it.
+         * Unitless wrapped OKLCH lightness uses CSS's 0–1 scale, unlike the UI.
+         * @param {string} value Complete rgb/hsl/hsv/lch/oklch/cmyk function string.
+         * @returns {ColorTriple | null} Fractional sRGB, or null for malformed/alpha input.
+         */
         function parseFunctional(value) {
+          /** @type {RegExpMatchArray | null} Supported function name and complete argument text. */
           const match = value.trim().match(/^(rgb|rgba|hsl|hsla|hsv|hsb|lch|oklch|cmyk)\(\s*([^)]*)\s*\)$/i);
           if (!match) return null;
+          /** @type {string} Lowercase source function name. */
           const format = match[1].toLowerCase();
           if (format === "rgba" || format === "hsla") return null;
+          /** @type {number} Required opaque component count. */
           const count = format === "cmyk" ? 4 : 3;
+          /** @type {string} Trimmed function argument text. */
           const body = match[2].trim();
+          /** @type {string[]} Components after validating the function's separator style. */
           let tokens;
           if (body.includes("/")) return null;
           if (body.includes(",")) {
             if (format === "lch" || format === "oklch") return null;
+            /** @type {string[]} Comma-delimited arguments, each required to hold one token. */
             const groups = body.split(",");
             if (groups.length !== count) return null;
-            if (groups.some((group) => group.trim().split(/\s+/).length !== 1)) return null;
-            tokens = groups.map((group) => group.trim());
+            if (groups.some(/** @param {string} group @returns {boolean} */ (group) => group.trim().split(/\s+/).length !== 1)) return null;
+            tokens = groups.map(/** @param {string} group @returns {string} */ (group) => group.trim());
           } else {
             tokens = body ? body.split(/\s+/) : [];
           }
           if (tokens.length !== count) return null;
+          /** @type {Array<ColorNumber | null>} Parsed components before the all-valid check. */
           const parts = tokens.map(parseColorNumber);
-          if (parts.some((part) => !part)) return null;
+          if (parts.some(/** @param {ColorNumber | null} part @returns {boolean} */ (part) => !part)) return null;
 
           if (format === "rgb" || format === "rgba") {
-            if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
-            if (body.includes(",") && parts.some((part) => part.unit !== parts[0].unit)) return null;
-            return finiteColor(parts.map(({ value, unit }) => unit === "%"
+            if (parts.some(/** @param {ColorNumber} part @returns {boolean} */ (part) => part.unit !== "" && part.unit !== "%")) return null;
+            if (body.includes(",") && parts.some(/** @param {ColorNumber} part @returns {boolean} */ (part) => part.unit !== parts[0].unit)) return null;
+            return finiteColor(parts.map(/** @param {ColorNumber} part @returns {number} */ ({ value, unit }) => unit === "%"
               ? clamp(value, 0, 100) * 255 / 100
               : clamp(value, 0, 255)));
           }
           if (format === "hsl" || format === "hsla") {
             if (!["", "deg", "°", "grad", "rad", "turn"].includes(parts[0].unit)) return null;
             if (body.includes(",")
-              ? parts.slice(1).some((part) => part.unit !== "%")
-              : parts.slice(1).some((part) => part.unit !== "" && part.unit !== "%")) return null;
+              ? parts.slice(1).some(/** @param {ColorNumber} part @returns {boolean} */ (part) => part.unit !== "%")
+              : parts.slice(1).some(/** @param {ColorNumber} part @returns {boolean} */ (part) => part.unit !== "" && part.unit !== "%")) return null;
             return finiteColor(hslToRgb(hueInDegrees(parts[0]), clamp(parts[1].value, 0, 100), clamp(parts[2].value, 0, 100)));
           }
           if (format === "hsv" || format === "hsb") {
-            if (!["", "deg", "°", "grad", "rad", "turn"].includes(parts[0].unit) || parts.slice(1).some((part) => part.unit !== "" && part.unit !== "%")) return null;
+            if (!["", "deg", "°", "grad", "rad", "turn"].includes(parts[0].unit) || parts.slice(1).some(/** @param {ColorNumber} part @returns {boolean} */ (part) => part.unit !== "" && part.unit !== "%")) return null;
             return finiteColor(hsvToRgb(hueInDegrees(parts[0]), clamp(parts[1].value, 0, 100), clamp(parts[2].value, 0, 100)));
           }
           if (format === "lch" || format === "oklch") {
-            if (parts.some((part, i) => i === 0 || i === 1
+            if (parts.some(/** @param {ColorNumber} part @param {number} i @returns {boolean} */ (part, i) => i === 0 || i === 1
               ? part.unit !== "" && part.unit !== "%"
               : !["", "deg", "°", "grad", "rad", "turn"].includes(part.unit))) return null;
+            /** @type {number} Lightness normalized to the converters' 0–100 scale. */
             const lightness = format === "oklch" && parts[0].unit === ""
               ? clamp(parts[0].value, 0, 1) * 100
               : clamp(parts[0].value, 0, 100);
+            /** @type {number} Absolute chroma in the selected perceptual color space. */
             const chroma = parts[1].unit === "%"
               ? clamp(parts[1].value, 0, 100) * (format === "lch" ? 1.5 : .004)
               : clamp(parts[1].value, 0, format === "lch" ? 200 : .5);
+            /** @type {number} Hue converted to a bounded degree remainder. */
             const hue = hueInDegrees(parts[2]);
             return finiteColor(format === "lch"
               ? lchToRgb(lightness, chroma, hue)
               : oklchToRgb(lightness, chroma, hue));
           }
           if (format === "cmyk") {
-            if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
-            return finiteColor(cmykToRgb(...parts.map(({ value }) => clamp(value, 0, 100))));
+            if (parts.some(/** @param {ColorNumber} part @returns {boolean} */ (part) => part.unit !== "" && part.unit !== "%")) return null;
+            return finiteColor(cmykToRgb(...parts.map(/** @param {ColorNumber} part @returns {number} */ ({ value }) => clamp(value, 0, 100))));
           }
           return null;
         }
 
+        /**
+         * Parse a complete bare tuple using the target field's format and UI units.
+         * Bare OKLCH lightness remains 0–100; commas/spaces and supported units work.
+         * @param {string} key Target format/component key.
+         * @param {string} value Three components, or four for CMYK; alpha is unsupported.
+         * @returns {ColorTriple | null} Fractional sRGB, or null for an invalid tuple.
+         */
         function parseBareFormat(key, value) {
+          /** @type {string} Model inferred from the component key. */
           const format = key.split("-")[0];
+          /** @type {number} Expected channel count in this representation. */
           const expectedParts = format === "cmyk" ? 4 : 3;
           if (!["rgb", "hsl", "hsv", "lch", "oklch", "cmyk"].includes(format)) return null;
 
           if (value.includes("/")) return null;
+          /** @type {string[]} Nonempty component tokens, permitting mixed commas/spaces. */
           const tokens = value.trim().split(/[\s,]+/).filter(Boolean);
           if (tokens.length !== expectedParts) return null;
+          /** @type {ColorNumber[]} Successfully parsed values with their units intact. */
           const parts = [];
+          /** @type {string} Current unparsed component token. */
           for (const token of tokens) {
+            /** @type {ColorNumber | null} Parsed component or null for unsupported syntax. */
             const part = parseColorNumber(token);
             if (!part) return null;
             parts.push(part);
           }
-          const values = parts.map(({ value: part }) => part);
+          /** @type {number[]} Numeric components to normalize into converter units. */
+          const values = parts.map(/** @param {ColorNumber} component @returns {number} */ ({ value: part }) => part);
 
           if (format === "rgb") {
-            if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
-            const channels = parts.map(({ value, unit }) => unit === "%" ? clamp(value, 0, 100) * 255 / 100 : value);
-            return channels.every((part) => Number.isFinite(part) && part >= 0 && part <= 255) ? channels : null;
+            if (parts.some(/** @param {ColorNumber} part @returns {boolean} */ (part) => part.unit !== "" && part.unit !== "%")) return null;
+            /** @type {ColorTriple} RGB components normalized from percentages where present. */
+            const channels = parts.map(/** @param {ColorNumber} part @returns {number} */ ({ value, unit }) => unit === "%" ? clamp(value, 0, 100) * 255 / 100 : value);
+            return channels.every(/** @param {number} part @returns {boolean} */ (part) => Number.isFinite(part) && part >= 0 && part <= 255) ? channels : null;
           }
           if (format === "hsl" || format === "hsv") {
-            if (!["", "deg", "°", "grad", "rad", "turn"].includes(parts[0].unit) || parts.slice(1).some((part) => part.unit !== "" && part.unit !== "%")) return null;
+            if (!["", "deg", "°", "grad", "rad", "turn"].includes(parts[0].unit) || parts.slice(1).some(/** @param {ColorNumber} part @returns {boolean} */ (part) => part.unit !== "" && part.unit !== "%")) return null;
             if (values[1] < 0 || values[1] > 100 || values[2] < 0 || values[2] > 100) return null;
             values[0] = hueInDegrees(parts[0]);
             return finiteColor(format === "hsl" ? hslToRgb(...values) : hsvToRgb(...values));
@@ -1300,10 +1529,11 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             values[2] = hueInDegrees(parts[2]);
             return finiteColor(oklchToRgb(...values));
           }
-          if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
-          return values.every((part) => part >= 0 && part <= 100) ? finiteColor(cmykToRgb(...values)) : null;
+          if (parts.some(/** @param {ColorNumber} part @returns {boolean} */ (part) => part.unit !== "" && part.unit !== "%")) return null;
+          return values.every(/** @param {number} part @returns {boolean} */ (part) => part >= 0 && part <= 100) ? finiteColor(cmykToRgb(...values)) : null;
         }
 
+        /** @param {string} key Changed component key. @returns {ColorTriple | null} RGB derived from its fieldset, or null if the current edit cannot be accepted. */
         function rgbFromInput(key) {
           if (key === "hex") {
             // Avoid expanding shorthand while someone is still typing a longer hex value.
@@ -1311,36 +1541,45 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             return parseHex($(key).value);
           }
           if (key.startsWith("rgb-")) {
+            /** @type {ColorTriple} Numeric RGB input values before range checks and rounding. */
             const vals = ["rgb-r", "rgb-g", "rgb-b"].map(number);
-            return vals.every(Number.isFinite) && vals.every((v) => v >= 0 && v <= 255) ? vals.map(Math.round) : null;
+            return vals.every(Number.isFinite) && vals.every(/** @param {number} v @returns {boolean} */ (v) => v >= 0 && v <= 255) ? vals.map(Math.round) : null;
           }
           if (key.startsWith("hsl-")) {
+            /** @type {ColorTriple} Hue degrees, saturation %, and lightness % from HSL inputs. */
             const vals = ["hsl-h", "hsl-s", "hsl-l"].map(number);
             return vals.every(Number.isFinite) && vals[1] >= 0 && vals[1] <= 100 && vals[2] >= 0 && vals[2] <= 100 ? finiteColor(hslToRgb(...vals)) : null;
           }
           if (key.startsWith("hsv-")) {
+            /** @type {ColorTriple} Hue degrees, saturation %, and value % from HSV inputs. */
             const vals = ["hsv-h", "hsv-s", "hsv-v"].map(number);
             return vals.every(Number.isFinite) && vals[1] >= 0 && vals[1] <= 100 && vals[2] >= 0 && vals[2] <= 100 ? finiteColor(hsvToRgb(...vals)) : null;
           }
           if (key.startsWith("lch-")) {
+            /** @type {ColorTriple} LCH lightness 0–100, chroma, and hue degrees. */
             const vals = ["lch-l", "lch-c", "lch-h"].map(number);
             vals[2] = hueInDegrees({ value: vals[2], unit: "" });
             return vals.every(Number.isFinite) && vals[0] >= 0 && vals[0] <= 100 && vals[1] >= 0 ? finiteColor(lchToRgb(...vals)) : null;
           }
           if (key.startsWith("oklch-")) {
+            /** @type {ColorTriple} OKLCH lightness %, chroma, and hue degrees. */
             const vals = ["oklch-l", "oklch-c", "oklch-h"].map(number);
             vals[2] = hueInDegrees({ value: vals[2], unit: "" });
             return vals.every(Number.isFinite) && vals[0] >= 0 && vals[0] <= 100 && vals[1] >= 0 ? finiteColor(oklchToRgb(...vals)) : null;
           }
           if (key.startsWith("cmyk-")) {
+            /** @type {[number, number, number, number]} CMYK channel percentages. */
             const vals = ["cmyk-c", "cmyk-m", "cmyk-y", "cmyk-k"].map(number);
-            return vals.every(Number.isFinite) && vals.every((v) => v >= 0 && v <= 100) ? finiteColor(cmykToRgb(...vals)) : null;
+            return vals.every(Number.isFinite) && vals.every(/** @param {number} v @returns {boolean} */ (v) => v >= 0 && v <= 100) ? finiteColor(cmykToRgb(...vals)) : null;
           }
           return null;
         }
 
+        /** @param {HTMLInputElement} input Edited field. @returns {void} Accept complete colors or component edits; retain rejected text and restore the HEX edit snapshot when applicable. */
         function handleInput(input) {
+          /** @type {string} Format/component key of the edited field. */
           const key = input.dataset.key;
+          /** @returns {void} Mark this edit invalid and roll HEX state back without erasing its text. */
           const reject = () => {
             input.setAttribute("aria-invalid", "true");
             if (key === "hex" && hexEditRgb) {
@@ -1349,17 +1588,19 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             }
           };
           if (input.value.trim() === "") { reject(); return; }
+          /** @type {ColorTriple | null} Whole-color result if this text is a wrapped function or bare tuple. */
           const pastedFormat = parseFunctional(input.value) || parseBareFormat(key, input.value);
           if (pastedFormat) {
             rememberInputHue(key, input.value, inputFormat(key, input.value));
-            rgb = pastedFormat.map((v) => clamp(v, 0, 255));
+            rgb = pastedFormat.map(/** @param {number} v @returns {number} */ (v) => clamp(v, 0, 255));
             updateFields();
             return;
           }
+          /** @type {ColorTriple | null} Candidate RGB from a scalar/component edit. */
           const next = rgbFromInput(key);
           if (next) {
             if (key.endsWith("-h")) rememberInputHue(key, input.value, key.split("-")[0], true);
-            rgb = next.map((v) => clamp(v, 0, 255));
+            rgb = next.map(/** @param {number} v @returns {number} */ (v) => clamp(v, 0, 255));
             input.setAttribute("aria-invalid", "false");
             updateFields(key);
           } else {
@@ -1367,7 +1608,9 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           }
         }
 
+        /** @returns {boolean} Commit a valid three-digit HEX on blur/Enter, refreshing fields; return false for any other text. */
         function commitHexShorthand() {
+          /** @type {string} Pending HEX field text with surrounding whitespace removed. */
           const value = $("hex").value.trim();
           if (!/^#?[\da-f]{3}$/i.test(value)) return false;
           rgb = parseHex(value);
@@ -1375,9 +1618,18 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return true;
         }
 
+        /**
+         * Handle unambiguous whole-color pastes without stealing scalar numeric edits.
+         * @param {string} key Target field key; HEX and numeric fields have different precedence.
+         * @param {string} value Clipboard text before browser insertion.
+         * @returns {boolean} Whether a complete color was accepted and native paste should be canceled.
+         */
         function pasteColor(key, value) {
+          /** @type {string} Whitespace-trimmed text used to resolve paste ambiguity. */
           const trimmed = value.trim();
+          /** @type {ColorTriple | null | undefined} Candidate whole color from the selected parser. */
           let color;
+          /** @type {ColorTriple | null} Parsed HEX color, also marking HEX rather than model-specific input. */
           let hex = null;
           if (key === "hex") {
             hex = parseHex(value);
@@ -1394,27 +1646,33 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           }
           if (!color) return false;
           rememberInputHue(key, value, hex ? "hex" : inputFormat(key, value));
-          rgb = color.map((v) => clamp(v, 0, 255));
+          rgb = color.map(/** @param {number} v @returns {number} */ (v) => clamp(v, 0, 255));
           updateFields();
           if (key === "hex") hexEditRgb = rgb.slice();
           return true;
         }
 
-        inputs.forEach((input) => {
+        inputs.forEach(/** @param {HTMLInputElement} input @returns {void} Install editing, paste, commit, and snapshot handlers. */ (input) => {
+          /** @returns {void} Snapshot the selected color when a new HEX editing session starts. */
           input.addEventListener("focus", () => {
             if (input.dataset.key === "hex") hexEditRgb = rgb.slice();
           });
+          /** @param {ClipboardEvent} event @returns {void} Accept a full color or leave ordinary insertion to the browser. */
           input.addEventListener("paste", (event) => {
+            /** @type {string} Plain-text clipboard contents, or empty text when unavailable. */
             const pasted = event.clipboardData?.getData("text") || "";
             if (pasteColor(input.dataset.key, pasted)) event.preventDefault();
           });
+          /** @returns {void} Parse the changed field without interfering with its current edit. */
           input.addEventListener("input", () => handleInput(input));
+          /** @param {KeyboardEvent} event @returns {void} Commit shorthand HEX on Enter and advance its rollback snapshot. */
           input.addEventListener("keydown", (event) => {
             if (input.dataset.key === "hex" && event.key === "Enter" && commitHexShorthand()) {
               event.preventDefault();
               hexEditRgb = rgb.slice();
             }
           });
+          /** @returns {void} Commit shorthand or settle a valid edit, then end the HEX edit snapshot. */
           input.addEventListener("blur", () => {
             if (input.dataset.key === "hex" && commitHexShorthand()) {
               input.setAttribute("aria-invalid", "false");
@@ -1425,55 +1683,72 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           });
         });
 
-        sliders.forEach((slider) => {
+        sliders.forEach(/** @param {HTMLInputElement} slider @returns {void} Connect each range control to its text field. */ (slider) => {
+          /** @returns {void} Forward a four-significant-digit slider value through the normal input handler. */
           slider.addEventListener("input", () => {
+            /** @type {HTMLInputElement} Text field associated with this range control. */
             const field = $(slider.dataset.sliderFor);
             activeSliderKey = slider.dataset.sliderFor;
             field.value = String(significant(Number(slider.value)));
             field.dispatchEvent(new Event("input", { bubbles: true }));
             activeSliderKey = null;
           });
+          /** @returns {void} Normalize the resulting in-gamut value after native slider commit. */
           slider.addEventListener("change", () => settleChromaChange(slider.dataset.sliderFor));
         });
 
+        /** @param {Event} event Native color input event, whose target is the picker. @returns {void} Replace the shared color with the picker's opaque HEX selection. */
         $("native-picker").addEventListener("input", (event) => {
           rgb = parseHex(event.target.value);
           updateFields();
         });
 
+        /** @type {Record<string, () => string>} Clipboard serializers using current state and the UI's display precision. */
         const copyValues = {
+          /** @returns {string} Opaque uppercase six-digit HEX. */
           hex: () => hexFromRgb(rgb),
+          /** @returns {string} CSS RGB using whole 0–255 channels. */
           rgb: () => `rgb(${rgb.map(Math.round).join(" ")})`,
-          hsl: () => { const v = colorCoordinates().hsl; return `hsl(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
-          hsv: () => { const v = colorCoordinates().hsv; return `hsv(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
-          lch: () => { const v = colorCoordinates().lch; return `lch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
-          oklch: () => { const v = colorCoordinates().oklch; return `oklch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
-          cmyk: () => `cmyk(${rgbToCmyk(rgb).map((v) => round(v)).join(" ")})`
+          /** @returns {string} CSS HSL with percentage saturation/lightness and retained hue. */
+          hsl: () => { /** @type {ColorTriple} Hue degrees, saturation %, and lightness % for copying. */ const v = colorCoordinates().hsl; return `hsl(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
+          /** @returns {string} Design-tool HSV notation, not a standard CSS color function. */
+          hsv: () => { /** @type {ColorTriple} Hue degrees, saturation %, and value % for copying. */ const v = colorCoordinates().hsv; return `hsv(${round(v[0])} ${round(v[1])}% ${round(v[2])}%)`; },
+          /** @returns {string} CSS D50 LCH with percentage lightness and four-significant-digit chroma. */
+          lch: () => { /** @type {ColorTriple} D50 LCH lightness, chroma, and hue for copying. */ const v = colorCoordinates().lch; return `lch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
+          /** @returns {string} CSS OKLCH with percentage lightness and four-significant-digit chroma. */
+          oklch: () => { /** @type {ColorTriple} OKLCH lightness %, chroma, and hue for copying. */ const v = colorCoordinates().oklch; return `oklch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
+          /** @returns {string} Approximate CMYK percentages in utility notation, not profile-managed CSS. */
+          cmyk: () => `cmyk(${rgbToCmyk(rgb).map(/** @param {number} v @returns {number} */ (v) => round(v)).join(" ")})`
         };
 
-        document.querySelectorAll("[data-copy]").forEach((button) => {
+        document.querySelectorAll("[data-copy]").forEach(/** @param {HTMLButtonElement} button @returns {void} Register its format-specific copy action. */ (button) => {
+          /** @returns {Promise<void>} Write the current color to the clipboard and report success/failure in the toast. */
           button.addEventListener("click", async () => {
+            /** @type {string} Current serialized value for the requested format. */
             const value = copyValues[button.dataset.copy]();
             try {
               await navigator.clipboard.writeText(value);
               $("toast").textContent = `Copied ${value}`;
               $("toast").classList.add("visible");
               clearTimeout(toastTimer);
-              toastTimer = setTimeout(() => $("toast").classList.remove("visible"), 1600);
+              toastTimer = setTimeout(/** @returns {void} Hide the successful-copy notification. */ () => $("toast").classList.remove("visible"), 1600);
             } catch {
               $("toast").textContent = "Clipboard access unavailable";
               $("toast").classList.add("visible");
               clearTimeout(toastTimer);
-              toastTimer = setTimeout(() => $("toast").classList.remove("visible"), 1800);
+              toastTimer = setTimeout(/** @returns {void} Hide the clipboard-failure notification. */ () => $("toast").classList.remove("visible"), 1800);
             }
           });
         });
 
+        /** @type {ColorTriple | null} Initial opaque color from the URL fragment, if valid. */
         const colorFromUrl = parseHex(window.location.hash);
         if (colorFromUrl) rgb = colorFromUrl;
         updateFields();
         urlSyncReady = true;
+        /** @returns {void} Load valid opaque HEX fragment changes; ignore unrelated/invalid fragments. */
         window.addEventListener("hashchange", () => {
+          /** @type {ColorTriple | null} Parsed RGB of the new URL fragment. */
           const colorFromHash = parseHex(window.location.hash);
           if (!colorFromHash) return;
           rgb = colorFromHash;
