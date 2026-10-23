@@ -37,7 +37,7 @@ const createSettleInputOnBlur = (settleChromaChange) => new Function(
   "settleChromaChange",
   `${script.slice(blurHelperStart, blurHelperEnd)}; return settleInputOnBlur;`,
 )(settleChromaChange); // eslint-disable-line no-new-func
-const parserStart = script.indexOf("function parseColorTokens(");
+const parserStart = script.indexOf("function parseColorNumber(");
 const parserEnd = script.indexOf("function parseBareFormat(", parserStart);
 const parseFunctional = new Function(
   "clamp", "hslToRgb", "hsvToRgb", "lchToRgb", "oklchToRgb", "cmykToRgb",

@@ -1,56 +1,147 @@
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const test = require("node:test");
-const vm = require("node:vm");
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import vm from "node:vm";
 
-const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
-const script = html.match(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/i)?.[1];
-assert.ok(script, "index.html should contain the application script");
-const parserStart = script.indexOf("function rgbToHsl(");
-const parserEnd = script.indexOf("function rgbFromInput(", parserStart);
-const parserSource = `const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-const colorNames = [];
-${script.slice(parserStart, parserEnd)}`;
-const { parseFunctional, parseBareFormat } = vm.runInNewContext(
-  `${parserSource}\n;({ parseFunctional, parseBareFormat })`,
-);
+const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const lowerHtml = html.toLowerCase();
+const scriptTagStart = lowerHtml.indexOf("<script");
+const scriptBodyStart = html.indexOf(">", scriptTagStart) + 1;
+const scriptEnd = lowerHtml.indexOf("</script", scriptBodyStart);
+assert.ok(scriptTagStart !== -1 && scriptBodyStart > 0 && scriptEnd !== -1, "index.html should contain the application script");
+const script = html.slice(scriptBodyStart, scriptEnd);
+const start = script.indexOf("const clamp =");
+const end = script.indexOf("inputs.forEach", start);
+assert.ok(start !== -1 && end !== -1, "parser functions should be present in the application script");
 
-function assertColorsEqual(actual, expected) {
-  assert.ok(actual && expected, "both colors should parse");
-  actual.forEach((channel, i) => assert.ok(Math.abs(channel - expected[i]) < 1e-8, `${channel} != ${expected[i]}`));
-}
+const fields = {};
+const context = { fields, document: { getElementById: (id) => fields[id] || { value: "" } } };
+vm.runInNewContext(`const colorNames = [];
+const inputByKey = { get: (key) => fields[key] };
+let rgb = [91, 140, 118];
+const $ = (id) => document.getElementById(id);
+${script.slice(start, end)}
+globalThis.colorParser = { parseFunctional, parseBareFormat, rgbFromInput, pasteColor, getRgb: () => rgb };`, context);
+const { parseFunctional, parseBareFormat, rgbFromInput, pasteColor, getRgb } = context.colorParser;
 
-test("RGB percentages work with space and comma separators", () => {
-  assert.deepEqual(Array.from(parseFunctional("rgb(100% 0% 0%)")), [255, 0, 0]);
-  assert.deepEqual(Array.from(parseFunctional("rgb(100%, 0%, 0%)")), [255, 0, 0]);
-});
+const closeTo = (actual, expected) => {
+  assert.ok(actual, "expected a parsed color");
+  assert.equal(actual.length, 3);
+  actual.forEach((channel, i) => assert.ok(Math.abs(channel - expected[i]) < 1e-6));
+};
 
-test("wrapped OKLCH unitless and percentage lightness use CSS scales", () => {
-  assertColorsEqual(parseFunctional("oklch(0.6 0.1 150)"), parseFunctional("oklch(60% 0.1 150)"));
-  assertColorsEqual(parseFunctional("oklch(60% 25% 150)"), parseFunctional("oklch(60% 0.1 150)"));
-  assertColorsEqual(parseBareFormat("oklch-l", "60 0.1 150"), parseFunctional("oklch(60% 0.1 150)"));
-});
-
-test("LCH chroma percentages use the CSS reference range", () => {
-  assertColorsEqual(parseFunctional("lch(50% 20% 150)"), parseFunctional("lch(50% 30 150)"));
-});
-
-test("hue units convert to equivalent degrees", () => {
-  const expected = parseFunctional("hsl(180deg 100% 50%)");
+test("functional color syntax accepts supported forms and normalizes values", () => {
+  const valid = [
+    ["rgb(12, 0, 0)", [12, 0, 0]],
+    ["rgb(100% 0% 0%)", [255, 0, 0]],
+    ["rgb(50% 0% 0%)", [127.5, 0, 0]],
+    ["rgb(255 255 100%)", [255, 255, 255]],
+    ["hsl(120, 100%, 50%)", [0, 255, 0]],
+    ["hsl(120 100 50)", [0, 255, 0]],
+    ["hsl(120 100% 50)", [0, 255, 0]],
+    ["hsl(120 150% -10%)", [0, 0, 0]],
+    ["hsv(120 100% 100%)", [0, 255, 0]],
+    ["lch(50% 40 30deg)", null],
+    ["oklch(50% .1 30deg)", null],
+    ["cmyk(0%, 100%, 100%, 0%)", [255, 0, 0]],
+    ["rgb(1e308 0 0)", [255, 0, 0]],
+    ["lch(50% 1e308 0deg)", null]
+  ];
+  for (const [input, expected] of valid) {
+    const actual = parseFunctional(input);
+    if (expected) closeTo(actual, expected);
+    else assert.ok(actual?.every(Number.isFinite), `expected finite output for ${input}`);
+  }
+  closeTo(parseFunctional("hsl(20 30% 40)"), parseFunctional("hsl(20 30% 40%)"));
+  const expectedHue = parseFunctional("hsl(180deg 100% 50%)");
   for (const hue of ["0.5turn", `${Math.PI}rad`, "200grad"]) {
-    assertColorsEqual(parseFunctional(`hsl(${hue} 100% 50%)`), expected);
+    closeTo(parseFunctional(`hsl(${hue} 100% 50%)`), expectedHue);
+  }
+  closeTo(parseFunctional("oklch(0.6 0.1 150)"), parseFunctional("oklch(60% 0.1 150)"));
+  closeTo(parseFunctional("oklch(60% 25% 150)"), parseFunctional("oklch(60% 0.1 150)"));
+  closeTo(parseFunctional("lch(50% 20% 150)"), parseFunctional("lch(50% 30 150)"));
+});
+
+test("functional color syntax rejects malformed tokens, separators, counts, and units", () => {
+  const invalid = [
+    "rgb(12oops 0 0)",
+    "hsl(20 30 40 50 60)",
+    "rgb(1 2 3 4)",
+    "rgb(1 2 / 3)",
+    "rgb(1 2 3 / .5 / .2)",
+    "rgb(1, 2, 3 / .5)",
+    "rgb(1,,3)",
+    "rgb(1deg 2 3)",
+    "hsl(20 30deg 40%)",
+    "hsl(120, 100, 50)",
+    "hsla(480deg 100% 50%)",
+    "hsla(120, 100, 50)",
+    "hsv(20 30% 40% / .5)",
+    "lch(50% 30deg 20deg)",
+    "cmyk(0 0 0 0 / .5)",
+    "rgb(1 2 3) trailing",
+    "rgb(255 0 0 / 0.5)",
+    "rgba(255, 0, 0, 0.5)"
+  ];
+  for (const input of invalid) assert.equal(parseFunctional(input), null, input);
+});
+
+test("functional angles and perceptual percentages are converted", () => {
+  const equivalents = [
+    ["hsl(120deg 100% 50%)", "hsl(133.33333333333334grad 100% 50%)"],
+    ["hsl(120deg 100% 50%)", "hsl(2.0943951023931953rad 100% 50%)"],
+    ["lch(50% 45 0deg)", "lch(50% 30% 0deg)"],
+    ["oklch(50% .1 0deg)", "oklch(50% 25% 0deg)"]
+  ];
+  for (const [first, second] of equivalents) {
+    const expected = parseFunctional(first);
+    const actual = parseFunctional(second);
+    assert.ok(expected && actual);
+    expected.forEach((channel, i) => assert.ok(Math.abs(channel - actual[i]) < 1e-6));
   }
 });
 
-test("bare HSL forms keep the UI's percent-scale syntax", () => {
-  const expected = parseBareFormat("hsl-h", "153 11% 45%");
-  assertColorsEqual(parseBareFormat("hsl-h", "153 11 45"), expected);
-  assertColorsEqual(parseBareFormat("hsl-h", "153,11%,45%"), expected);
+test("bare values retain flexible separators and HSL units", () => {
+  const valid = [
+    ["hsl-h", "120, 100%, 50%", [0, 255, 0]],
+    ["hsl-h", "120 100 50", [0, 255, 0]],
+    ["hsl-h", "120deg, 100%, 50%", [0, 255, 0]],
+    ["rgb-r", "100%, 0%, 0%", [255, 0, 0]],
+    ["rgb-r", "50% 0% 0%", [127.5, 0, 0]],
+    ["rgb-r", "255 255 100%", [255, 255, 255]]
+  ];
+  for (const [key, input, expected] of valid) closeTo(parseBareFormat(key, input), expected);
+  const hslExpected = parseBareFormat("hsl-h", "153 11% 45%");
+  closeTo(parseBareFormat("hsl-h", "153 11 45"), hslExpected);
+  closeTo(parseBareFormat("hsl-h", "153,11%,45%"), hslExpected);
+  closeTo(parseBareFormat("oklch-l", "60 0.1 150"), parseFunctional("oklch(60% 0.1 150)"));
 });
 
-test("unsupported units and ignored alpha components are rejected", () => {
-  assert.equal(parseFunctional("rgb(100foo 0 0)"), null);
-  assert.equal(parseFunctional("rgb(255 0 0 / 0.5)"), null);
-  assert.equal(parseFunctional("rgba(255, 0, 0, 0.5)"), null);
+test("bare values reject suffixes outside their component roles", () => {
+  const invalid = [
+    ["rgb-r", "10deg 20 30"],
+    ["hsl-h", "20 30deg 40"],
+    ["hsl-h", "20% 30 40"],
+    ["lch-l", "50 20deg 30"],
+    ["lch-l", "50 20deg 30"],
+    ["cmyk-c", "0 0 0 0deg"],
+    ["rgb-r", "10 20 30/"]
+  ];
+  for (const [key, input] of invalid) assert.equal(parseBareFormat(key, input), null, input);
+});
+
+test("direct component edits with extreme hues remain finite", () => {
+  for (const [format, key] of [["lch", "lch-h"], ["oklch", "oklch-h"]]) {
+    for (const component of ["l", "c", "h"]) fields[`${format}-${component}`] = { value: component === "l" ? "50" : component === "c" ? "0.2" : "1e308" };
+    const color = rgbFromInput(key);
+    assert.ok(color?.every(Number.isFinite), `${format} should normalize its extreme hue`);
+  }
+});
+
+test("rejected pasted colors do not mutate the selected color", () => {
+  const initial = Array.from(getRgb());
+  for (const input of ["rgb(12oops 0 0)", "hsl(20 30 40 50 60)", "rgb(1e999 0 0)"]) {
+    assert.equal(pasteColor("rgb-r", input), false, input);
+    assert.deepEqual(Array.from(getRgb()), initial, input);
+  }
 });
