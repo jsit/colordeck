@@ -850,6 +850,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [entry.slice(0, separator), entry.slice(separator + 1)];
         });
         let rgb = [91, 140, 118];
+        let hexEditRgb = null;
         let activeSliderKey = null;
         let urlSyncReady = false;
         let toastTimer;
@@ -1252,6 +1253,32 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return null;
         }
 
+        function handleInput(input) {
+          const key = input.dataset.key;
+          const reject = () => {
+            input.setAttribute("aria-invalid", "true");
+            if (key === "hex" && hexEditRgb) {
+              rgb = hexEditRgb.slice();
+              updateFields(key);
+            }
+          };
+          if (input.value.trim() === "") { reject(); return; }
+          const pastedFormat = parseFunctional(input.value) || parseBareFormat(key, input.value);
+          if (pastedFormat) {
+            rgb = pastedFormat.map((v) => clamp(v, 0, 255));
+            updateFields();
+            return;
+          }
+          const next = rgbFromInput(key);
+          if (next) {
+            rgb = next.map((v) => clamp(v, 0, 255));
+            input.setAttribute("aria-invalid", "false");
+            updateFields(key);
+          } else {
+            reject();
+          }
+        }
+
         function pasteColor(key, value) {
           const trimmed = value.trim();
           let color;
@@ -1268,34 +1295,22 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           if (!color) return false;
           rgb = color.map((v) => clamp(v, 0, 255));
           updateFields();
+          if (key === "hex") hexEditRgb = rgb.slice();
           return true;
         }
 
         inputs.forEach((input) => {
+          input.addEventListener("focus", () => {
+            if (input.dataset.key === "hex") hexEditRgb = rgb.slice();
+          });
           input.addEventListener("paste", (event) => {
             const pasted = event.clipboardData?.getData("text") || "";
             if (pasteColor(input.dataset.key, pasted)) event.preventDefault();
           });
-          input.addEventListener("input", () => {
-            const key = input.dataset.key;
-            if (input.value.trim() === "") { input.setAttribute("aria-invalid", "true"); return; }
-            const pastedFormat = parseFunctional(input.value) || parseBareFormat(key, input.value);
-            if (pastedFormat) {
-              rgb = pastedFormat.map((v) => clamp(v, 0, 255));
-              updateFields();
-              return;
-            }
-            const next = rgbFromInput(key);
-            if (next) {
-              rgb = next.map((v) => clamp(v, 0, 255));
-              input.setAttribute("aria-invalid", "false");
-              updateFields(key);
-            } else {
-              input.setAttribute("aria-invalid", "true");
-            }
-          });
+          input.addEventListener("input", () => handleInput(input));
           input.addEventListener("blur", () => {
             settleInputOnBlur(input);
+            if (input.dataset.key === "hex") hexEditRgb = null;
           });
         });
 
