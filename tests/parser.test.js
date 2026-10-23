@@ -7,7 +7,11 @@ const vm = require("node:vm");
 const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const script = html.match(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/i)?.[1];
 assert.ok(script, "index.html should contain the application script");
-const parserSource = script.slice(script.indexOf("        const clamp ="), script.indexOf("        inputs.forEach((input) => {"));
+const parserStart = script.indexOf("function rgbToHsl(");
+const parserEnd = script.indexOf("function rgbFromInput(", parserStart);
+const parserSource = `const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const colorNames = [];
+${script.slice(parserStart, parserEnd)}`;
 const { parseFunctional, parseBareFormat } = vm.runInNewContext(
   `${parserSource}\n;({ parseFunctional, parseBareFormat })`,
 );
