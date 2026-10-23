@@ -917,7 +917,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
 
         function xyzToLab([x, y, z]) {
           // Bradford adaptation from D65 (sRGB) to D50, the CSS CIELAB reference white.
-          const d50 = [.9555766 * x - .0230393 * y + .0631636 * z, -.0282895 * x + 1.0099416 * y + .0210077 * z, .0122982 * x - .020483 * y + 1.3299098 * z];
+          const d50 = [1.0478112 * x + .0228866 * y - .050127 * z, .0295424 * x + .9904844 * y - .0170491 * z, -.0092345 * x + .0150436 * y + .7521316 * z];
           const f = (t) => t > .008856451679 ? Math.cbrt(t) : 7.787037 * t + 16 / 116;
           const fx = f(d50[0] / .96422), fy = f(d50[1]), fz = f(d50[2] / .82521);
           return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
@@ -928,7 +928,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           const finv = (t) => t ** 3 > .008856451679 ? t ** 3 : (t - 16 / 116) / 7.787037;
           const x = .96422 * finv(fx), y = finv(fy), z = .82521 * finv(fz);
           // Inverse Bradford adaptation from D50 back to the sRGB D65 white point.
-          return [x * 1.0478112 + y * .0228866 - z * .050127, x * .0295424 + y * .9904844 - z * .0170491, -x * .0092345 + y * .0150436 + z * .7521316];
+          return [.9555766 * x - .0230393 * y + .0631636 * z, -.0282895 * x + 1.0099416 * y + .0210077 * z, .0122982 * x - .020483 * y + 1.3299098 * z];
         }
 
         function rgbToLch(color) {
