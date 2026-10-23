@@ -34,6 +34,8 @@ test("functional color syntax accepts supported forms and normalizes values", ()
   const valid = [
     ["rgb(12, 0, 0)", [12, 0, 0]],
     ["rgb(100% 0% 0%)", [255, 0, 0]],
+    ["rgb(50% 0% 0%)", [127.5, 0, 0]],
+    ["rgb(255 255 100%)", [255, 255, 255]],
     ["hsl(120, 100%, 50%)", [0, 255, 0]],
     ["hsla(480deg 100% 50%)", [0, 255, 0]],
     ["hsl(120 150% -10%)", [0, 0, 0]],
@@ -100,7 +102,9 @@ test("bare values retain flexible separators and HSL units", () => {
     ["hsl-h", "120, 100%, 50%", [0, 255, 0]],
     ["hsl-h", "120 100 50", [0, 255, 0]],
     ["hsl-h", "120deg, 100%, 50%", [0, 255, 0]],
-    ["rgb-r", "100%, 0%, 0%", [255, 0, 0]]
+    ["rgb-r", "100%, 0%, 0%", [255, 0, 0]],
+    ["rgb-r", "50% 0% 0%", [127.5, 0, 0]],
+    ["rgb-r", "255 255 100%", [255, 255, 255]]
   ];
   for (const [key, input, expected] of valid) closeTo(parseBareFormat(key, input), expected);
   const hslExpected = parseBareFormat("hsl-h", "153 11% 45%");

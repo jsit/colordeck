@@ -1168,7 +1168,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
             if (body.includes(",") && parts.some((part) => part.unit !== parts[0].unit)) return null;
             return finiteColor(parts.map(({ value, unit }) => unit === "%"
-              ? clamp(value, 0, 100) * 2.55
+              ? clamp(value, 0, 100) * 255 / 100
               : clamp(value, 0, 255)));
           }
           if (format === "hsl" || format === "hsla") {
@@ -1219,7 +1219,7 @@ Light Green|#90ee90`.split("\n").map((entry) => {
 
           if (format === "rgb") {
             if (parts.some((part) => part.unit !== "" && part.unit !== "%")) return null;
-            const channels = parts.map(({ value, unit }) => unit === "%" ? clamp(value, 0, 100) * 2.55 : value);
+            const channels = parts.map(({ value, unit }) => unit === "%" ? clamp(value, 0, 100) * 255 / 100 : value);
             return channels.every((part) => Number.isFinite(part) && part >= 0 && part <= 255) ? channels : null;
           }
           if (format === "hsl" || format === "hsv") {
