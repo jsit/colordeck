@@ -25,6 +25,7 @@ test("RGB percentages work with space and comma separators", () => {
 test("wrapped OKLCH unitless and percentage lightness use CSS scales", () => {
   assertColorsEqual(parseFunctional("oklch(0.6 0.1 150)"), parseFunctional("oklch(60% 0.1 150)"));
   assertColorsEqual(parseFunctional("oklch(60% 25% 150)"), parseFunctional("oklch(60% 0.1 150)"));
+  assertColorsEqual(parseBareFormat("oklch-l", "60 0.1 150"), parseFunctional("oklch(60% 0.1 150)"));
 });
 
 test("LCH chroma percentages use the CSS reference range", () => {
