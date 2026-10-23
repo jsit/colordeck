@@ -923,6 +923,12 @@ Light Green|#90ee90`.split("\n").map((entry) => {
           return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
         }
 
+        const colorNameLabs = colorNames.map((entry) => {
+          const hex = entry[1].slice(1);
+          const sample = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+          return xyzToLab(rgbToXyz(sample));
+        });
+
         function labToXyz([l, a, b]) {
           const fy = (l + 16) / 116, fx = fy + a / 500, fz = fy - b / 200;
           const finv = (t) => t ** 3 > .008856451679 ? t ** 3 : (t - 16 / 116) / 7.787037;
@@ -1026,15 +1032,13 @@ Light Green|#90ee90`.split("\n").map((entry) => {
 
         function closestName(color) {
           const lab = xyzToLab(rgbToXyz(color));
-          let best = colorNames[0], distance = Infinity;
-          for (const entry of colorNames) {
-            const hex = entry[1].slice(1);
-            const sample = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
-            const targetLab = xyzToLab(rgbToXyz(sample));
+          let best = colorNames[0][0], distance = Infinity;
+          for (let i = 0; i < colorNames.length; i++) {
+            const targetLab = colorNameLabs[i];
             const d = Math.hypot(lab[0] - targetLab[0], lab[1] - targetLab[1], lab[2] - targetLab[2]);
-            if (d < distance) { distance = d; best = entry; }
+            if (d < distance) { distance = d; best = colorNames[i][0]; }
           }
-          return best[0];
+          return best;
         }
 
         function updateUrlColor(hex) {
