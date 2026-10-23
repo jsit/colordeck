@@ -29,10 +29,18 @@ function extractFunction(name, nextName, dependencies = []) {
 }
 
 const parseHex = extractFunction("parseHex", "parseFunctional");
-const parseFunctional = extractFunction(
-  "parseFunctional",
-  "parseBareFormat",
-  ["clamp", "hslToRgb", "hsvToRgb", "lchToRgb", "oklchToRgb", "cmykToRgb"],
+const parserStart = script.indexOf("function parseColorTokens(");
+const parserEnd = script.indexOf("function parseBareFormat(", parserStart);
+const parseFunctional = new Function(
+  "clamp", "hslToRgb", "hsvToRgb", "lchToRgb", "oklchToRgb", "cmykToRgb",
+  `${script.slice(parserStart, parserEnd)}; return parseFunctional;`,
+)(
+  (value, min, max) => Math.min(max, Math.max(min, value)),
+  () => [1, 2, 3],
+  () => [1, 2, 3],
+  () => [1, 2, 3],
+  () => [1, 2, 3],
+  () => [1, 2, 3],
 );
 
 test("HEX parsing accepts opaque shorthand and full values only", () => {
