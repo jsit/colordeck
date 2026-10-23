@@ -1108,24 +1108,8 @@ Light Green|#90ee90`.split("\n").map((entry) => {
             if (!isPreserved) setValue(key, value);
           };
           const hex = hexFromRgb(rgb);
-<<<<<<< HEAD
           const { hsl, hsv, lch, oklch } = colorCoordinates();
           const cmyk = rgbToCmyk(rgb);
-          const lchChromaSlider = document.querySelector('[data-slider-for="lch-c"]');
-          const oklchChromaSlider = document.querySelector('[data-slider-for="oklch-c"]');
-          if (lchChromaSlider) {
-            lchChromaSlider.min = 0;
-            lchChromaSlider.max = maxLchChroma(lch[0], lch[2]);
-            lchChromaSlider.step = "any";
-          }
-          if (oklchChromaSlider) {
-            oklchChromaSlider.min = 0;
-            oklchChromaSlider.max = maxOklchChroma(oklch[0], oklch[2]);
-            oklchChromaSlider.step = "any";
-          }
-=======
-          const hsl = rgbToHsl(rgb), hsv = rgbToHsv(rgb), lch = rgbToLch(rgb), oklch = rgbToOklch(rgb), cmyk = rgbToCmyk(rgb);
->>>>>>> origin/main
           write("hex", hex);
           ["rgb-r", "rgb-g", "rgb-b"].forEach((key, i) => write(key, round(rgb[i])));
           ["hsl-h", "hsl-s", "hsl-l"].forEach((key, i) => write(key, round(hsl[i])));
@@ -1296,23 +1280,22 @@ Light Green|#90ee90`.split("\n").map((entry) => {
         }
 
         function pasteColor(key, value) {
-<<<<<<< HEAD
-          const hex = parseHex(value);
-          const color = hex || parseFunctional(value) || parseBareFormat(key, value);
-=======
           const trimmed = value.trim();
           let color;
+          let hex = null;
           if (key === "hex") {
-            color = parseHex(value) || parseFunctional(value) || parseBareFormat(key, value);
+            hex = parseHex(value);
+            color = hex || parseFunctional(value) || parseBareFormat(key, value);
           } else if (trimmed.startsWith("#")) {
-            color = parseHex(value);
+            hex = parseHex(value);
+            color = hex;
           } else {
             color = parseFunctional(value) || parseBareFormat(key, value);
             if (!color && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) {
-              color = parseHex(value);
+              hex = parseHex(value);
+              color = hex;
             }
           }
->>>>>>> origin/main
           if (!color) return false;
           rememberInputHue(key, value, hex ? "hex" : inputFormat(key, value));
           rgb = color.map((v) => clamp(v, 0, 255));
