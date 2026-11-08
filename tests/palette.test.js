@@ -33,6 +33,8 @@ class Element {
   focus() { this.focused = true; }
   /** @param {string} name Simulated browser event. */
   dispatch(name) { this.listeners[name]?.({ target: this }); }
+  /** @param {Event} event Programmatic input event forwarded from a slider. @returns {boolean} Successful fixture dispatch. */
+  dispatchEvent(event) { this.dispatch(event.type); return true; }
 }
 
 /**
@@ -57,7 +59,7 @@ function createApp(stored = null, hash = "", blocked = false) {
   let historyIndex = 0;
   /** @type {object} Browser globals needed by the complete inline script. */
   const context = {
-    URL, console, setTimeout, clearTimeout,
+    URL, Event, console, setTimeout, clearTimeout,
     document: {
       /** @param {string} selector Supported app selector. @returns {Element[]} Matching elements. */
       querySelectorAll: (selector) => selector === "[id]" ? [...byId.values()] : selector === "[data-key]" ? elements.filter((element) => element.dataset.key) : selector === "[data-slider-for]" ? elements.filter((element) => element.dataset.sliderFor) : [],
@@ -93,6 +95,8 @@ function createApp(stored = null, hash = "", blocked = false) {
   vm.runInNewContext(script, context);
   return {
     byId,
+    /** @param {string} key Component field key. @returns {Element | undefined} Its real range control. */
+    slider: (key) => elements.find(/** @param {Element} element @returns {boolean} */ (element) => element.dataset.sliderFor === key),
     /** @returns {string | null} Current browser storage contents. */
     saved: () => stored,
     /** @returns {string} Current URL fragment. */
@@ -459,6 +463,96 @@ test("palette changes create history entries that Back and Forward can restore",
   assert.equal(app.hash(), "#ABCDEF,FF0000,00FF00");
   app.travel(1);
   assert.equal(app.hash(), "#ABCDEF,FF0000,00FF00");
+});
+
+/** Verify live slider input updates colors but commits one undoable history entry on release. */
+test("slider drags update the preview live and add history only on release", () => {
+  /** @type {object} Two-color palette whose first swatch is being edited. */
+  const app = createApp(null, "#000000,ABCDEF");
+  /** @type {Element} Actual red range control with its real input/change handlers. */
+  const slider = app.slider("rgb-r");
+  /** @type {number} Intermediate red-channel values during one continuous drag. */
+  for (const value of [32, 64, 96, 128]) {
+    slider.value = String(value);
+    slider.dispatch("input");
+    assert.equal(app.byId.get("rgb-r").value, String(value));
+    assert.equal(JSON.parse(app.saved()).colors[0][0], value);
+    assert.equal(app.squares()[0].style.backgroundColor, app.byId.get("preview-hex").textContent);
+    assert.equal(app.hash(), "#000000,ABCDEF");
+    assert.equal(app.historyLength(), 1);
+  }
+  assert.equal(app.byId.get("preview-hex").textContent, "#800000");
+  slider.dispatch("change");
+  assert.equal(app.hash(), "#800000,ABCDEF");
+  assert.equal(app.historyLength(), 2);
+  slider.value = "192";
+  slider.dispatch("input");
+  slider.value = "255";
+  slider.dispatch("input");
+  assert.equal(app.hash(), "#800000,ABCDEF");
+  assert.equal(app.historyLength(), 2);
+  slider.dispatch("change");
+  assert.equal(app.hash(), "#FF0000,ABCDEF");
+  assert.equal(app.historyLength(), 3);
+  app.travel(-1);
+  assert.equal(app.byId.get("hex").value, "#800000");
+  app.travel(-1);
+  assert.equal(app.byId.get("hex").value, "#000000");
+  app.travel(1);
+  app.travel(1);
+  assert.equal(app.byId.get("hex").value, "#FF0000");
+  app.edit("#00FF00");
+  assert.equal(app.hash(), "#00FF00,ABCDEF");
+  assert.equal(app.historyLength(), 4);
+});
+
+/** Verify each model's slider follows the same commit timing, including special chroma settling. */
+test("slider history waits for change across every color model", () => {
+  /** @type {[string, string[]]} Slider key and intermediate valid values for its model. */
+  for (const [key, values] of [["hsl-h", ["30", "60"]], ["hsv-h", ["30", "60"]], ["lch-c", ["10", "15"]], ["oklch-c", [".02", ".04"]], ["cmyk-c", ["25", "50"]]]) {
+    /** @type {object} Fresh color state for this model's drag. */
+    const app = createApp(null, "#5B8C76");
+    /** @type {Element} Actual native range control for this model. */
+    const slider = app.slider(key);
+    /** @type {string} One tick while the slider remains held. */
+    for (const value of values) {
+      slider.value = value;
+      slider.dispatch("input");
+      assert.equal(app.byId.get(key).getAttribute("aria-invalid"), "false");
+      assert.equal(app.historyLength(), 1);
+      assert.equal(app.hash(), "#5B8C76");
+    }
+    /** @type {string} Last live preview color, which will be committed on release. */
+    const finalHex = app.byId.get("preview-hex").textContent;
+    assert.notEqual(finalHex, "#5B8C76");
+    slider.dispatch("change");
+    assert.equal(app.hash(), finalHex);
+    assert.equal(app.historyLength(), 2);
+    app.travel(-1);
+    assert.equal(app.byId.get("hex").value, "#5B8C76");
+    app.travel(1);
+    assert.equal(app.byId.get("hex").value, finalHex);
+    assert.equal(app.historyLength(), 2);
+  }
+});
+
+/** Verify returning to the starting color does not add history or destroy the Forward stack. */
+test("slider drags with no net color change preserve browser history", () => {
+  /** @type {object} Palette with an existing Forward entry. */
+  const app = createApp(null, "#000000");
+  app.edit("#0000FF");
+  app.travel(-1);
+  /** @type {Element} Red slider briefly changed before returning to its original value. */
+  const slider = app.slider("rgb-r");
+  slider.value = "128";
+  slider.dispatch("input");
+  slider.value = "0";
+  slider.dispatch("input");
+  slider.dispatch("change");
+  assert.equal(app.hash(), "#000000");
+  assert.equal(app.historyLength(), 2);
+  app.travel(1);
+  assert.equal(app.byId.get("hex").value, "#0000FF");
 });
 
 /** Verify canonicalizing a manually entered fragment does not discard forward history. */

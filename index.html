@@ -1408,7 +1408,8 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
           $("color-name").textContent = closestName(rgb);
           $("native-picker").value = color;
           syncPalette();
-          if (urlSyncReady) updateUrlColor();
+          // Slider input previews live; its native change event records the final color on release.
+          if (urlSyncReady && activeSliderKey === null) updateUrlColor();
         }
 
         /** @param {string} key Committed component key. @returns {void} Normalize an edit while protecting L/H when only chroma was edited. */
@@ -1895,7 +1896,7 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
             field.dispatchEvent(new Event("input", { bubbles: true }));
             activeSliderKey = null;
           });
-          /** @returns {void} Normalize the resulting in-gamut value after native slider commit. */
+          /** @returns {void} Normalize the in-gamut value and record one history entry on native slider commit. */
           slider.addEventListener("change", () => settleChromaChange(slider.dataset.sliderFor));
         });
 
