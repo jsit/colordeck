@@ -151,6 +151,132 @@ test("palette duplicates, auto-saves edits, and switches every format", () => {
   assert.equal(JSON.parse(app.saved()).selected, 1);
 });
 
+/** Verify artist-wheel anchors, interpolation, and inverse edits through the real fields. */
+test("RYB hue maps artist-wheel anchors and interpolates reversibly", () => {
+  /** @type {object} Fully saturated color for checking hue independently of S/L. */
+  const app = createApp(null, "#FF0000");
+  /** @type {Element} Linked HSL and RYB hue fields. */
+  const hslHue = app.byId.get("hsl-h"), rybHue = app.byId.get("ryb-h");
+  /** @type {Array<[number, number]>} HSL/RYB anchors and intermediate angles. */
+  const pairs = [[0, 0], [15, 30], [30, 60], [45, 90], [60, 120], [90, 150], [120, 180], [180, 210], [240, 240], [255, 270], [270, 300], [300, 320], [315, 330], [359.4, 359.6]];
+  /** @type {[number, number]} One pair of corresponding hue angles. */
+  for (const [hsl, ryb] of pairs) {
+    hslHue.value = String(hsl);
+    hslHue.dispatch("input");
+    assert.equal(Number(rybHue.value), ryb);
+    /** @type {number[]} Fractional color before converting the displayed RYB angle back. */
+    const before = JSON.parse(app.saved()).colors[0];
+    rybHue.value = String(ryb);
+    rybHue.dispatch("input");
+    rybHue.dispatch("blur");
+    assert.equal(Number(rybHue.value), ryb);
+    assert.equal(Number(hslHue.value), Math.round(hsl));
+    JSON.parse(app.saved()).colors[0].forEach(/** @param {number} channel @param {number} index @returns {void} */ (channel, index) => assert.ok(Math.abs(channel - before[index]) < 1e-8));
+  }
+});
+
+/** Verify angle wrapping and optional units without accepting malformed scalar values. */
+test("RYB hue wraps finite angles and rejects invalid edits", () => {
+  /** @type {object} Red starting color with the actual RYB control. */
+  const app = createApp(null, "#FF0000");
+  /** @type {Element} Editable hue field. */
+  const input = app.byId.get("ryb-h");
+  /** @type {[string, string]} Supplied angle and canonical displayed RYB degrees. */
+  for (const [value, expected] of [["360", "0"], ["-120", "240"], ["480", "120"], ["120°", "120"], ["120deg", "120"], [".5turn", "180"], ["200grad", "180"], [`${Math.PI}rad`, "180"], ["1e308", "296"]]) {
+    input.value = value;
+    input.dispatch("input");
+    assert.equal(input.getAttribute("aria-invalid"), "false");
+    input.dispatch("blur");
+    assert.equal(input.value, expected);
+  }
+  /** @type {string} Last valid palette state, unchanged by invalid edits or blur. */
+  const saved = app.saved();
+  /** @type {string} Rejected angle text, including transparency and non-angle units. */
+  for (const value of ["", " ", "nope", "NaN", "Infinity", "1e309", "120%", "120px", "120 30", "120 / .5"]) {
+    input.value = value;
+    input.dispatch("input");
+    input.dispatch("blur");
+    assert.equal(input.getAttribute("aria-invalid"), "true");
+    assert.equal(input.value, value);
+    assert.equal(app.saved(), saved);
+  }
+});
+
+/** Verify RYB edits use fractional state, not rounded HSL display values. */
+test("RYB hue preserves HSL saturation and lightness", () => {
+  /** @type {object} Asymmetric RGB channels give non-integer HSL saturation and lightness. */
+  const app = createApp(null, "#345678");
+  /** @type {number[]} Initial fractional RGB channels. */
+  const before = JSON.parse(app.saved()).colors[0];
+  /** @type {number} Original chroma and lightness as the sum of the extreme channels. */
+  const chroma = Math.max(...before) - Math.min(...before), sum = Math.max(...before) + Math.min(...before);
+  /** @type {Element} Editable artist-wheel hue field. */
+  const input = app.byId.get("ryb-h");
+  /** @type {string} Hue positions spanning every interpolation segment. */
+  for (const value of ["45.5", "130", "190", "250", "310", "0"]) {
+    input.value = value;
+    input.dispatch("input");
+    input.dispatch("blur");
+    /** @type {number[]} Resulting fractional RGB channels from storage. */
+    const after = JSON.parse(app.saved()).colors[0];
+    assert.ok(Math.abs(Math.max(...after) - Math.min(...after) - chroma) < 1e-8);
+    assert.ok(Math.abs(Math.max(...after) + Math.min(...after) - sum) < 1e-8);
+  }
+});
+
+/** Verify gray and endpoint colors retain a chosen hue without inventing saturation. */
+test("RYB hue retains achromatic hues for subsequent HSL saturation edits", () => {
+  /** @type {string} Achromatic colors with no physically meaningful hue. */
+  for (const hex of ["#808080", "#000000", "#FFFFFF"]) {
+    /** @type {object} Fresh swatch with an initially undefined hue. */
+    const app = createApp(null, hex);
+    /** @type {Element} RYB hue field whose value must survive a powerless RGB conversion. */
+    const input = app.byId.get("ryb-h");
+    assert.equal(input.value, "0");
+    input.value = "120";
+    input.dispatch("input");
+    input.dispatch("blur");
+    assert.equal(input.value, "120");
+    assert.equal(app.byId.get("hsl-h").value, "60");
+    assert.equal(app.byId.get("hex").value, hex);
+    assert.equal(app.historyLength(), 1);
+    if (hex === "#808080") {
+      /** @type {Element} HSL saturation field using the retained hue. */
+      const saturation = app.byId.get("hsl-s");
+      saturation.value = "100";
+      saturation.dispatch("input");
+      assert.equal(app.byId.get("hex").value, "#FFFF00");
+      assert.equal(input.value, "120");
+    }
+  }
+});
+
+/** Verify palette selection and history update RYB along with the existing formats. */
+test("RYB hue edits synchronize the selected palette color and browser history", () => {
+  /** @type {object} Shared palette with separate red and blue swatches. */
+  const app = createApp(null, "#FF0000,0000FF");
+  /** @type {Element} Single editable RYB angle. */
+  const input = app.byId.get("ryb-h");
+  app.squares()[1].dispatch("click");
+  assert.equal(input.value, "240");
+  input.value = "120";
+  input.dispatch("input");
+  input.dispatch("blur");
+  assert.equal(app.hash(), "#FF0000,FFFF00");
+  assert.equal(app.squares()[1].style.backgroundColor, "#FFFF00");
+  assert.equal(app.historyLength(), 2);
+  assert.equal(JSON.parse(app.saved()).selected, 1);
+  app.travel(-1);
+  app.squares()[1].dispatch("click");
+  assert.equal(input.value, "240");
+  app.travel(1);
+  app.squares()[1].dispatch("click");
+  assert.equal(input.value, "120");
+  assert.equal(app.historyLength(), 2);
+  app.navigate("#808080");
+  assert.equal(input.value, "0");
+});
+
 /** Verify persistence without a fragment and URL precedence when opening a shared palette. */
 test("palette restores saved selection unless a shared palette is supplied", () => {
   /** @type {object} Original app session. */

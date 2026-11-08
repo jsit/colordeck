@@ -186,6 +186,11 @@
               <fieldset class="component-fields" aria-labelledby="oklch-title"><div class="field-row three"><div class="field"><label for="oklch-l">Lightness %</label><input id="oklch-l" data-key="oklch-l" type="text" inputmode="decimal" value="58" /><input type="range" min="0" max="100" step="0.1" value="58" data-slider-for="oklch-l" aria-label="Adjust OKLCH lightness" /></div><div class="field"><label for="oklch-c">Chroma</label><input id="oklch-c" data-key="oklch-c" type="text" inputmode="decimal" value="0.08" /><input type="range" min="0" max="0.4" step="0.001" value="0.08" data-slider-for="oklch-c" aria-label="Adjust OKLCH chroma" /></div><div class="field"><label for="oklch-h">Hue °</label><input id="oklch-h" data-key="oklch-h" type="text" inputmode="decimal" value="160" /><input type="range" min="0" max="360" step="0.1" value="160" data-slider-for="oklch-h" aria-label="Adjust OKLCH hue" /></div></div></fieldset><p class="hint">Max chroma follows lightness & hue</p>
             </article>
 
+            <article class="format-card" data-format="ryb">
+              <div class="format-top"><h3 class="format-title" id="ryb-title">RYB Hue <span class="format-tag">ARTIST</span></h3><button class="copy-button" type="button" aria-label="Copy RYB hue" data-copy="ryb"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
+              <fieldset class="component-fields" aria-labelledby="ryb-title"><div class="field-row one"><div class="field"><label for="ryb-h">RYB Hue °</label><input id="ryb-h" data-key="ryb-h" type="text" inputmode="decimal" value="196.5" aria-describedby="ryb-hint" /></div></div></fieldset><p class="hint" id="ryb-hint">Approximate artist’s wheel: red 0° · yellow 120° · blue 240°. Preserves HSL saturation/lightness; not paint mixing.</p>
+            </article>
+
             <article class="format-card" data-format="cmyk">
               <div class="format-top"><h3 class="format-title" id="cmyk-title">CMYK <span class="format-tag">PRINT</span></h3><button class="copy-button" type="button" aria-label="Copy CMYK value" data-copy="cmyk"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.25" y="5.25" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M10.75 5V3.5A1.5 1.5 0 0 0 9.25 2h-5A1.5 1.5 0 0 0 2.75 3.5v6A1.5 1.5 0 0 0 4.25 11H5" stroke="currentColor" stroke-width="1.2"/></svg><span>Copy</span></button></div>
               <fieldset class="component-fields" aria-labelledby="cmyk-title"><div class="field-row two"><div class="field"><label for="cmyk-c">Cyan %</label><input id="cmyk-c" data-key="cmyk-c" type="text" inputmode="decimal" value="35" /><input type="range" min="0" max="100" step="1" value="35" data-slider-for="cmyk-c" aria-label="Adjust cyan" /></div><div class="field"><label for="cmyk-m">Magenta %</label><input id="cmyk-m" data-key="cmyk-m" type="text" inputmode="decimal" value="0" /><input type="range" min="0" max="100" step="1" value="0" data-slider-for="cmyk-m" aria-label="Adjust magenta" /></div><div class="field"><label for="cmyk-y">Yellow %</label><input id="cmyk-y" data-key="cmyk-y" type="text" inputmode="decimal" value="16" /><input type="range" min="0" max="100" step="1" value="16" data-slider-for="cmyk-y" aria-label="Adjust yellow" /></div><div class="field"><label for="cmyk-k">Black %</label><input id="cmyk-k" data-key="cmyk-k" type="text" inputmode="decimal" value="45" /><input type="range" min="0" max="100" step="1" value="45" data-slider-for="cmyk-k" aria-label="Adjust black" /></div></div></fieldset><p class="hint">Approximate screen-to-print conversion</p>
@@ -939,6 +944,37 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
         const normalizedHue = (hue) => ((hue % 360) + 360) % 360;
         /** @type {number} Threshold for treating saturation/chroma or endpoint lightness as powerless. */
         const hueTolerance = 0.0001;
+        /** @type {Array<{rgb: number, ryb: number}>} Approximate HSL/artist-wheel hue pairs, ending at the repeated red anchor. */
+        const rybHueAnchors = [
+          { rgb: 0, ryb: 0 },     // Red.
+          { rgb: 30, ryb: 60 },   // Orange.
+          { rgb: 60, ryb: 120 },  // Yellow.
+          { rgb: 120, ryb: 180 }, // Green.
+          { rgb: 240, ryb: 240 }, // Blue.
+          { rgb: 270, ryb: 300 }, // Violet.
+          { rgb: 360, ryb: 360 }
+        ];
+
+        /**
+         * Linearly interpolate a chosen artist's wheel, not a standardized RYB space.
+         * Sharing the same anchors in both directions keeps edits reversible.
+         * @param {number} hue Finite angle in degrees, wrapped around the wheel.
+         * @param {boolean} [toRgb=false] Convert RYB to HSL hue instead of HSL to RYB.
+         * @returns {number} Corresponding hue in [0, 360).
+         */
+        function mapRybHue(hue, toRgb = false) {
+          hue = normalizedHue(hue);
+          /** @type {"rgb" | "ryb"} Coordinate being converted from. */
+          const source = toRgb ? "ryb" : "rgb";
+          /** @type {"rgb" | "ryb"} Coordinate being converted to. */
+          const target = toRgb ? "rgb" : "ryb";
+          /** @type {number} Index of the upper anchor in the surrounding segment. */
+          const upperIndex = rybHueAnchors.findIndex(/** @param {{rgb: number, ryb: number}} anchor @returns {boolean} */ (anchor) => anchor[source] > hue);
+          /** @type {{rgb: number, ryb: number}} Lower and upper anchors enclosing the wrapped hue. */
+          const lower = rybHueAnchors[upperIndex - 1], upper = rybHueAnchors[upperIndex];
+          return lower[target] + (hue - lower[source]) / (upper[source] - lower[source]) * (upper[target] - lower[target]);
+        }
+
         /**
          * Keep an explicit hue when an achromatic color cannot determine one.
          * @param {HueModel} model Color representation whose hue is being tracked.
@@ -984,6 +1020,13 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
          * @returns {void}
          */
         function rememberInputHue(key, value, format, scalar = false) {
+          if (format === "ryb" && scalar) {
+            // RYB shares HSL's retained hue so a gray stays gray until saturation changes.
+            /** @type {ColorNumber | null} Accepted RYB angle, including an optional angle unit. */
+            const angle = parseColorNumber(value.trim());
+            if (angle && colorHue(angle) !== null) retainedHues.hsl = mapRybHue(hueInDegrees(angle), true);
+            return;
+          }
           if (!["hsl", "hsv", "lch", "oklch"].includes(format)) return;
           /** @type {RegExpMatchArray | null} Wrapped function and its component text, if present. */
           const functional = value.trim().match(/^(hsl|hsla|hsv|hsb|lch|oklch)\(\s*([^)]*)\s*\)$/i);
@@ -1332,6 +1375,7 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
           /** @type {[number, number, number, number]} Approximate print-channel percentages. */
           const cmyk = rgbToCmyk(rgb);
           write("hex", hex);
+          write("ryb-h", round(mapRybHue(hsl[0]), 1));
           ["rgb-r", "rgb-g", "rgb-b"].forEach(/** @param {string} key @param {number} i @returns {void} */ (key, i) => write(key, round(rgb[i])));
           ["hsl-h", "hsl-s", "hsl-l"].forEach(/** @param {string} key @param {number} i @returns {void} */ (key, i) => write(key, round(hsl[i])));
           ["hsv-h", "hsv-s", "hsv-v"].forEach(/** @param {string} key @param {number} i @returns {void} */ (key, i) => write(key, round(hsv[i])));
@@ -1582,6 +1626,14 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
             /** @type {ColorTriple} Numeric RGB input values before range checks and rounding. */
             const vals = ["rgb-r", "rgb-g", "rgb-b"].map(number);
             return vals.every(Number.isFinite) && vals.every(/** @param {number} v @returns {boolean} */ (v) => v >= 0 && v <= 255) ? vals.map(Math.round) : null;
+          }
+          if (key === "ryb-h") {
+            /** @type {ColorNumber | null} One angle, rejecting empty text, percentages, and malformed tokens. */
+            const angle = parseColorNumber($(key).value.trim());
+            if (!angle || colorHue(angle) === null) return null;
+            /** @type {ColorTriple} Unrounded HSL coordinates; only hue changes on the artist's wheel. */
+            const hsl = colorCoordinates().hsl;
+            return finiteColor(hslToRgb(mapRybHue(hueInDegrees(angle), true), hsl[1], hsl[2]));
           }
           if (key.startsWith("hsl-")) {
             /** @type {ColorTriple} Hue degrees, saturation %, and lightness % from HSL inputs. */
@@ -1867,6 +1919,8 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
           lch: () => { /** @type {ColorTriple} D50 LCH lightness, chroma, and hue for copying. */ const v = colorCoordinates().lch; return `lch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
           /** @returns {string} CSS OKLCH with percentage lightness and four-significant-digit chroma. */
           oklch: () => { /** @type {ColorTriple} OKLCH lightness %, chroma, and hue for copying. */ const v = colorCoordinates().oklch; return `oklch(${round(v[0], 1)}% ${significant(v[1])} ${round(v[2], 1)})`; },
+          /** @returns {string} Approximate artist-wheel hue angle, not a CSS color function. */
+          ryb: () => `${round(mapRybHue(colorCoordinates().hsl[0]), 1)}°`,
           /** @returns {string} Approximate CMYK percentages in utility notation, not profile-managed CSS. */
           cmyk: () => `cmyk(${rgbToCmyk(rgb).map(/** @param {number} v @returns {number} */ (v) => round(v)).join(" ")})`
         };
