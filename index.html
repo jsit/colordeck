@@ -57,6 +57,19 @@
       .section-heading { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 14px; }
       .section-heading h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
       .section-heading p { margin: 0; color: var(--muted); font-size: 11px; }
+      .palette { margin-bottom: 32px; }
+      .palette .section-heading { align-items: center; gap: 12px; }
+      .palette-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+      .palette-add:disabled { opacity: .5; cursor: not-allowed; }
+      .palette-add { padding: 7px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); color: var(--green); font-size: 12px; cursor: pointer; }
+      .palette-colors { display: flex; gap: 12px; overflow-x: auto; padding: 5px; }
+      .palette-entry { flex: 0 0 128px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .palette-color { grid-column: 1 / -1; width: 128px; height: 128px; padding: 0; border: 1px solid rgba(32,37,31,.2); border-radius: 5px; cursor: pointer; }
+      .palette-move { height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--white); color: var(--green); cursor: pointer; }
+      .palette-move:disabled { opacity: .35; cursor: not-allowed; }
+      .palette-color[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 3px; }
+      .palette-color:focus-visible, .palette-add:focus-visible, .palette-move:focus-visible { box-shadow: 0 0 0 5px var(--green-light); outline: 2px solid var(--green); outline-offset: 3px; }
+      .palette-note { margin: 12px 0 0; color: var(--green); font-size: 11px; }
       .formats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
       .format-card { min-width: 0; padding: 17px; border: 1px solid var(--line); border-radius: 11px; background: var(--white); }
       .format-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 17px; }
@@ -132,6 +145,12 @@
             <div><span class="meta-label">Closest X11 color name</span><div class="color-name" id="color-name">Teal</div></div>
             <div class="preview-bottom"><div><span class="meta-label">Current color</span><div class="preview-hex" id="preview-hex">#5B8C76</div></div><label class="sr-only" for="native-picker">Choose a color</label><input class="color-input" id="native-picker" type="color" value="#5b8c76" /></div>
           </div>
+        </section>
+
+        <section class="palette" aria-labelledby="palette-title">
+          <div class="section-heading"><h2 id="palette-title">Palette</h2><div class="palette-actions"><button class="palette-add" id="palette-remove" type="button" disabled>Remove selected color</button><button class="palette-add" id="palette-add" type="button">+ Add color</button></div></div>
+          <div class="palette-colors" id="palette-colors" role="group" aria-label="Palette colors"></div>
+          <p class="palette-note" id="palette-note" role="status">Select a square to edit it. Changes are saved in this browser.</p>
         </section>
 
         <section aria-labelledby="formats-title">
@@ -890,6 +909,14 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
         let toastTimer;
         /** @type {{lch: ChromaMaximum | null, oklch: ChromaMaximum | null}} Per-model gamut limits. */
         const chromaMaxima = { lch: null, oklch: null };
+        /** @type {ColorTriple[]} Independent editable swatches, retaining fractional RGB. */
+        let paletteColors = [];
+        /** @type {number} Index of the palette swatch currently being edited. */
+        let selectedColor = 0;
+        /** @type {string} Versioned browser storage key for the palette and selection. */
+        const paletteStorageKey = "colordeck.palette.v1";
+        /** @type {string} Last successfully stored snapshot; avoids writes on unchanged refreshes. */
+        let savedPalette = "";
 
         /** @param {number} value @param {number} min @param {number} max @returns {number} Value bounded inclusively by min/max. */
         const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -912,7 +939,6 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
         const normalizedHue = (hue) => ((hue % 360) + 360) % 360;
         /** @type {number} Threshold for treating saturation/chroma or endpoint lightness as powerless. */
         const hueTolerance = 0.0001;
-
         /**
          * Keep an explicit hue when an achromatic color cannot determine one.
          * @param {HueModel} model Color representation whose hue is being tracked.
@@ -1258,13 +1284,24 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
           return best;
         }
 
-        /** @param {string} hex Uppercase six-digit HEX including its hash. @returns {void} Replace the URL fragment without adding a history entry. */
-        function updateUrlColor(hex) {
+        /** @param {string} hash URL fragment containing comma-separated opaque HEX colors. @returns {ColorTriple[] | null} Entire ordered palette, or null if any entry is invalid. */
+        function parsePaletteHash(hash) {
+          /** @type {string[]} HEX tokens without the fragment's leading hash. */
+          const tokens = hash.replace(/^#/, "").split(",");
+          if (!tokens.every(/** @param {string} token @returns {boolean} */ (token) => /^(?:[\da-f]{3}|[\da-f]{6})$/i.test(token))) return null;
+          return tokens.map(parseHex);
+        }
+
+        /** @param {boolean} [replace=false] Normalize startup/navigation without creating an extra history entry. @returns {void} Serialize palette edits into navigable browser history. */
+        function updateUrlColor(replace = false) {
+          /** @type {string} Ordered palette serialized as uppercase six-digit HEX tokens. */
+          const hash = "#" + paletteColors.map(/** @param {ColorTriple} color @returns {string} */ (color) => hexFromRgb(color).slice(1)).join(",");
           /** @type {URL} Current page URL, retaining its path and query parameters. */
           const url = new URL(window.location.href);
-          if (url.hash.toUpperCase() === hex) return;
-          url.hash = hex;
-          window.history.replaceState(window.history.state, "", url);
+          if (url.hash === hash) return;
+          url.hash = hash;
+          if (replace) window.history.replaceState(window.history.state, "", url);
+          else window.history.pushState(window.history.state, "", url);
         }
 
         /**
@@ -1326,7 +1363,8 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
           $("preview-hex").textContent = hex;
           $("color-name").textContent = closestName(rgb);
           $("native-picker").value = color;
-          if (urlSyncReady) updateUrlColor(hex);
+          syncPalette();
+          if (urlSyncReady) updateUrlColor();
         }
 
         /** @param {string} key Committed component key. @returns {void} Normalize an edit while protecting L/H when only chroma was edited. */
@@ -1652,6 +1690,118 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
           return true;
         }
 
+        /** @returns {void} Load a validated palette; unavailable or corrupt storage never blocks editing. */
+        function loadPalette() {
+          try {
+            /** @type {unknown} Untrusted browser data, validated before use. */
+            const stored = JSON.parse(localStorage.getItem(paletteStorageKey));
+            if (!stored || !Array.isArray(stored.colors) || !stored.colors.length ||
+                !stored.colors.every(/** @param {unknown} color @returns {boolean} */ (color) =>
+                  Array.isArray(color) && color.length === 3 && color.every(/** @param {unknown} channel @returns {boolean} */ (channel) =>
+                    Number.isFinite(channel) && channel >= 0 && channel <= 255)) ||
+                !Number.isInteger(stored.selected) || stored.selected < 0 || stored.selected >= stored.colors.length) return;
+            paletteColors = stored.colors;
+            selectedColor = stored.selected;
+            rgb = [...paletteColors[selectedColor]];
+          } catch {
+            // Private browsing, quotas, and malformed data must not disable the converter.
+            $("palette-note").textContent = "Browser storage unavailable or unreadable. Your palette works for this visit.";
+          }
+        }
+
+        /** @returns {void} Update the active swatch, render new buttons, and persist changed palette state. */
+        function syncPalette() {
+          if (!paletteColors.length) return;
+          paletteColors[selectedColor] = [...rgb];
+          /** @type {HTMLElement} Swatch container; existing buttons are kept to preserve keyboard focus. */
+          const container = $("palette-colors");
+          // Entries are indexed by position; trim the tail and refresh remaining labels after removal.
+          while (container.children.length > paletteColors.length) container.removeChild(container.lastElementChild);
+          $("palette-remove").disabled = paletteColors.length <= 1;
+          paletteColors.forEach(/** @param {ColorTriple} color @param {number} index @returns {void} */ (color, index) => {
+            /** @type {HTMLElement} Existing or newly created swatch and its movement controls. */
+            let entry = container.children[index];
+            if (!entry) {
+              entry = document.createElement("div");
+              entry.className = "palette-entry";
+              /** @type {HTMLButtonElement} Color selection square above the movement controls. */
+              const swatch = document.createElement("button");
+              swatch.type = "button";
+              swatch.className = "palette-color";
+              /** @returns {void} Select this square and load all of its color representations. */
+              swatch.addEventListener("click", () => selectPaletteColor(index));
+              entry.append(swatch);
+              [-1, 1].forEach(/** @param {-1 | 1} direction @returns {void} */ (direction) => {
+                /** @type {HTMLButtonElement} Move this position one place left or right. */
+                const arrow = document.createElement("button");
+                arrow.type = "button";
+                arrow.className = "palette-move";
+                arrow.textContent = direction === -1 ? "←" : "→";
+                /** @returns {void} Reorder one adjacent pair without changing the edited color. */
+                arrow.addEventListener("click", () => movePaletteColor(index, direction));
+                entry.append(arrow);
+              });
+              container.append(entry);
+            }
+            /** @type {HTMLButtonElement} Square whose color and selection state follow this position. */
+            const button = entry.children[0];
+            /** @type {HTMLButtonElement} Left movement control. */
+            const left = entry.children[1];
+            /** @type {HTMLButtonElement} Right movement control. */
+            const right = entry.children[2];
+            /** @type {string} Accessible color identifier and CSS swatch value. */
+            const hex = hexFromRgb(color);
+            button.style.backgroundColor = hex;
+            button.setAttribute("aria-label", `Color ${index + 1}: ${hex}`);
+            button.setAttribute("aria-pressed", String(index === selectedColor));
+            button.title = `Color ${index + 1}: ${hex}`;
+            left.disabled = index === 0;
+            right.disabled = index === paletteColors.length - 1;
+            left.setAttribute("aria-label", `Move color ${index + 1}: ${hex} left`);
+            right.setAttribute("aria-label", `Move color ${index + 1}: ${hex} right`);
+          });
+          /** @type {string} Serialized RGB palette and active selection. */
+          const snapshot = JSON.stringify({ colors: paletteColors, selected: selectedColor });
+          if (snapshot === savedPalette) return;
+          try {
+            localStorage.setItem(paletteStorageKey, snapshot);
+            savedPalette = snapshot;
+            $("palette-note").textContent = "Select a square to edit it. Changes are saved in this browser.";
+          } catch {
+            $("palette-note").textContent = "Could not save in this browser. Your palette works for this visit.";
+          }
+        }
+
+        /** @param {number} index Swatch position to move. @param {-1 | 1} direction Adjacent left/right offset. @returns {void} Reorder colors while keeping the same color selected and focused. */
+        function movePaletteColor(index, direction) {
+          /** @type {number} Destination position, bounded by the palette ends. */
+          const destination = index + direction;
+          if (destination < 0 || destination >= paletteColors.length) return;
+          [paletteColors[index], paletteColors[destination]] = [paletteColors[destination], paletteColors[index]];
+          // Follow the selected swatch, including when its neighbor moves across it.
+          if (selectedColor === index) selectedColor = destination;
+          else if (selectedColor === destination) selectedColor = index;
+          updateFields();
+          $("palette-colors").children[destination].children[0].focus();
+        }
+
+        /** @returns {void} Remove the selected swatch, keeping at least one editable color and focusing its neighbor. */
+        function removeSelectedPaletteColor() {
+          if (paletteColors.length <= 1) return;
+          paletteColors.splice(selectedColor, 1);
+          selectPaletteColor(Math.min(selectedColor, paletteColors.length - 1));
+          $("palette-colors").children[selectedColor].children[0].focus();
+        }
+
+        /** @param {number} index Palette entry to edit. @returns {void} Switch colors without carrying pending HEX edits or another swatch's hue. */
+        function selectPaletteColor(index) {
+          selectedColor = index;
+          rgb = [...paletteColors[index]];
+          hexEditRgb = null;
+          Object.keys(retainedHues).forEach(/** @param {HueModel} model @returns {void} */ (model) => { retainedHues[model] = null; });
+          updateFields();
+        }
+
         inputs.forEach(/** @param {HTMLInputElement} input @returns {void} Install editing, paste, commit, and snapshot handlers. */ (input) => {
           /** @returns {void} Snapshot the selected color when a new HEX editing session starts. */
           input.addEventListener("focus", () => {
@@ -1741,18 +1891,36 @@ Light Green|#90ee90`.split("\n").map(/** @param {string} entry @returns {[string
           });
         });
 
-        /** @type {ColorTriple | null} Initial opaque color from the URL fragment, if valid. */
-        const colorFromUrl = parseHex(window.location.hash);
-        if (colorFromUrl) rgb = colorFromUrl;
+        /** @type {ColorTriple[] | null} Shared palette takes precedence over browser-saved colors. */
+        const colorsFromUrl = parsePaletteHash(window.location.hash);
+        if (colorsFromUrl) {
+          paletteColors = colorsFromUrl;
+          rgb = [...paletteColors[0]];
+        } else {
+          loadPalette();
+        }
+        if (!paletteColors.length) paletteColors.push([...rgb]);
+        $("palette-remove").addEventListener("click", removeSelectedPaletteColor);
+        /** @returns {void} Duplicate and select the current swatch so subsequent edits leave the original intact. */
+        $("palette-add").addEventListener("click", () => {
+          paletteColors.push([...rgb]);
+          selectPaletteColor(paletteColors.length - 1);
+          $("palette-colors").lastElementChild.children[0].focus();
+        });
         updateFields();
+        updateUrlColor(true);
         urlSyncReady = true;
-        /** @returns {void} Load valid opaque HEX fragment changes; ignore unrelated/invalid fragments. */
+        /** @returns {void} Load a complete valid palette on fragment navigation; ignore malformed fragments. */
         window.addEventListener("hashchange", () => {
-          /** @type {ColorTriple | null} Parsed RGB of the new URL fragment. */
-          const colorFromHash = parseHex(window.location.hash);
-          if (!colorFromHash) return;
-          rgb = colorFromHash;
-          updateFields();
+          /** @type {ColorTriple[] | null} Entire palette parsed before changing any state. */
+          const colorsFromHash = parsePaletteHash(window.location.hash);
+          if (!colorsFromHash) return;
+          // Restoring history must not push a new entry or discard the Forward stack.
+          urlSyncReady = false;
+          paletteColors = colorsFromHash;
+          selectPaletteColor(0);
+          updateUrlColor(true);
+          urlSyncReady = true;
         });
       })();
     </script>
